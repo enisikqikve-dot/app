@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 5. November 2026 · Version 0.2 · Phase: Konzept (noch kein Code)
+Stand: 5. November 2026 · Version 0.3 · Phase: Meilenstein 1 fertig (Erster Planet)
 
 ---
 
@@ -927,7 +927,7 @@ nächsten Schritte.
 | # | Meilenstein | Was du danach sehen und tun kannst |
 |---|---|---|
 | ✅ 0 | **Konzept** | dieses Dokument |
-| 1 | **Erster Planet** | ein runder Planet mit Ozeanen, Kontinenten, Bergen und Klimazonen; echte Sonne mit Tag und Nacht; Gott-Kamera für Maus und Touch; Zeitsteuerung; Deutsch und Englisch |
+| ✅ 1 | **Erster Planet** | ein runder Planet mit Ozeanen, Kontinenten, Bergen und Klimazonen; echte Sonne mit Tag und Nacht; Gott-Kamera für Maus und Touch; Zeitsteuerung; Deutsch und Englisch |
 | 2 | **Zorn & Natur** ⭐ | die Naturkräfte: Blitz, Regen, Dürre, Sturm, Erdbeben, Vulkan, Flut, Meteorit, Eiszeit, Landschaft formen; spektakuläre Effekte, erste Geräusche, **Zurückspulen** |
 | 3 | **Erstes Leben** | Pflanzen und Tiere im Ökosystem; 6 Menschen mit Hunger, Durst und Schlaf; Symbol-Blasen und Akte; Segen und Leben & Tod; Folgen-Modus |
 | 4 | **Leben & Liebe** | Charakter, Gefühle, Beziehungen, Altern und Tod, Kinder mit Vererbung, Stammbaum, Weltchronik, Gedanken flüstern |
