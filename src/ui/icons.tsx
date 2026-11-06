@@ -426,6 +426,15 @@ export const IconBook = (p: IconProps) => (
   </Icon>
 );
 
+export const IconClone = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8.5" cy="7.5" r="2.5" />
+    <path d="M4 19c0-3 2-5 4.5-5S13 16 13 19" />
+    <circle cx="15.5" cy="7.5" r="2.5" stroke-dasharray="2 2" />
+    <path d="M13.8 14.4c.5-.3 1.1-.4 1.7-.4 2.5 0 4.5 2 4.5 5" stroke-dasharray="2 2" />
+  </Icon>
+);
+
 export const IconStats = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 4v16h16" />

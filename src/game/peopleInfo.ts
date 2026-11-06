@@ -119,6 +119,11 @@ export interface PersonInfo {
   ruler: GovForm | null;
   /** The village or town they live in. */
   home: string | null;
+  /** A robot or an AI being; part machine; cloned from someone; from the future. */
+  kind: 'robot' | 'ai' | null;
+  cyborg: boolean;
+  cloneOf: PersonRef | null;
+  traveler: boolean;
   /** How strongly they believe (0–1), in what, and whether they lead the rites. */
   faith: number;
   belief: Deity | null;
@@ -151,7 +156,7 @@ export interface FamilyTree {
   grandchildren: number;
 }
 
-export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'conflict' | 'civ' | 'knowledge' | 'animals' | 'faith' | 'nature';
+export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'conflict' | 'civ' | 'future' | 'knowledge' | 'animals' | 'faith' | 'nature';
 
 export interface ChronicleLine {
   index: number;
@@ -215,6 +220,8 @@ export interface PrayerInfo {
 }
 
 export interface FaithInfo {
+  /** They found out that you exist. */
+  found: boolean;
   image: 'kind' | 'wrathful' | 'fickle' | 'distant';
   good: number;
   bad: number;
@@ -236,7 +243,7 @@ export interface TribeInfo {
   chiefId: number;
   /** Warlike, pious, open (0–100). */
   culture: [number, number, number];
-  origin: 'first' | 'split' | 'far' | 'appeared';
+  origin: 'first' | 'split' | 'far' | 'appeared' | 'machines';
   parent: string | null;
   foundedYear: number;
   endedYear: number | null;
@@ -264,6 +271,10 @@ export interface SettlementInfo {
   temple: boolean;
   wall: boolean;
   foundedYear: number;
+  robots: number;
+  flying: boolean;
+  weatherMachine: boolean;
+  timeMachine: boolean;
 }
 
 export interface CivTechInfo {
@@ -353,6 +364,13 @@ const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
   law: 'civ',
   overseas: 'civ',
   epoch: 'civ',
+  machine: 'future',
+  clone: 'future',
+  flyingCity: 'future',
+  weatherShield: 'future',
+  timeTraveler: 'future',
+  godFound: 'future',
+  uprising: 'conflict',
   religionGone: 'faith',
   answered: 'faith',
 };
@@ -461,6 +479,10 @@ export class PeopleInfo {
       standing: living?.alive ? life.civ.standing(living) : null,
       ruler: alive && life.tribes.tribeOfBand(x.band)?.chief === x.id && life.tribes.tribeOfBand(x.band)!.gov !== undefined ? life.tribes.tribeOfBand(x.band)!.gov! : null,
       home: alive ? (life.civ.homeOf(x.band)?.name ?? null) : null,
+      kind: living?.kind ?? null,
+      cyborg: !!living?.cyborg,
+      cloneOf: living?.cloneOf !== undefined ? this.ref(life.anyone(living.cloneOf)) : null,
+      traveler: !!living?.traveler,
       faith: living ? (living.faith ?? 0) : 0,
       belief: this.deityOf(x.belief),
       shaman: !!x.shaman,
@@ -546,7 +568,7 @@ export class PeopleInfo {
     if (e.x !== undefined) line.tribe = tribes.tribe(e.x)?.name;
     if (e.y !== undefined) line.other = tribes.tribe(e.y)?.name;
     if (e.key === 'peace' && e.s) line.winner = tribes.tribe(Number(e.s))?.name;
-    if ((e.key === 'settled' || e.key === 'grew' || e.key === 'colony' || e.key === 'overseas' || e.key === 'abandoned' || e.key === 'conquered') && e.n !== undefined) {
+    if ((e.key === 'settled' || e.key === 'grew' || e.key === 'colony' || e.key === 'overseas' || e.key === 'abandoned' || e.key === 'conquered' || e.key === 'machine' || e.key === 'flyingCity' || e.key === 'weatherShield' || e.key === 'uprising') && e.n !== undefined) {
       const h = this.life.civ.settlement(e.n);
       if (h) {
         line.place = h.name;
@@ -683,6 +705,10 @@ export class PeopleInfo {
       temple: !!h.temple,
       wall: !!h.wall,
       foundedYear: dateFromMinutes(h.founded).year,
+      robots: h.robots ?? 0,
+      flying: !!h.flying,
+      weatherMachine: !!h.weatherMachine,
+      timeMachine: !!h.timeMachine,
     };
   }
 
@@ -766,7 +792,7 @@ export class PeopleInfo {
       prayers.push({ band: b.id, leader: leader?.name ?? '?', need: b.prayer.need, cell: b.prayer.cell });
     }
     const [good, bad] = life.raw.deeds ?? [0, 0];
-    return { image: faith.godImage(), good, bad, believers, population, religions, prayers };
+    return { found: !!life.raw.godFound, image: faith.godImage(), good, bad, believers, population, religions, prayers };
   }
 
   /** All animal species, living ones first. */

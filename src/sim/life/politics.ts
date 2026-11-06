@@ -98,6 +98,13 @@ export class PoliticsSystem {
       return this.setRuler(tribe, priest, 'chosen');
     }
     if (gov === 'republic' || gov === 'democracy') return this.election(tribe);
+    if (gov === 'ai') {
+      // Another mind takes over; without one, the people govern themselves again.
+      const mind = adults.find((p) => p.kind === 'ai');
+      if (mind) return this.setRuler(tribe, mind, 'chosen');
+      this.change(tribe, 'republic', 'reform');
+      return;
+    }
     if (gov === 'dictatorship') {
       // Without the dictator, the people choose again.
       this.change(tribe, this.knowsWriting(tribe) ? 'republic' : 'monarchy', 'dictatorEnd');
@@ -249,6 +256,11 @@ export class PoliticsSystem {
     life.chron('law', { x: tribe.id, s: law, ...(ruler ? { a: ruler.id } : {}) });
   }
 
+  /** A people hands power to someone (an artificial intelligence). */
+  handTo(tribe: Tribe, form: GovForm, ruler: Person): void {
+    this.change(tribe, form, form === 'ai' ? 'ai' : 'reform', ruler);
+  }
+
   /** A whispered wish to lead, given to someone in a people ruled by a crown, priests or a dictator: a coup. */
   onLeadWhisper(p: Person): void {
     const tribe = this.life.tribes.tribeOfBand(p.band);
@@ -276,5 +288,6 @@ export const RULER_TITLES: Record<GovForm, string> = {
   republic: 'consul',
   democracy: 'president',
   dictatorship: 'dictator',
+  ai: 'ai',
 };
 

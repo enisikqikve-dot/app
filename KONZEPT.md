@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 6. November 2026 · Version 1.1 · Phase: Meilenstein 9 fertig (Durch die Epochen)
+Stand: 6. November 2026 · Version 1.2 · Phase: Meilenstein 10 fertig (Sci-Fi-Zukunft)
 
 ---
 
@@ -936,7 +936,7 @@ nächsten Schritte.
 | ✅ 7 | **Stämme & Konflikte** | Völker mit Namen, Farbe, Kultur und Häuptling; Abspaltung; Begegnung und Tauschhandel; Beziehungen zwischen Völkern; Diebstahl, Mord und Verbannung; Kriege mit Schlachten, Unterwerfung und Frieden |
 | ✅ 8 | **Zivilisation** | Ackerbau, Viehzucht, Dörfer und Städte (mit gezählten Einwohnern), Siedler, Geld und Märkte, Arm und Reich, Regierungsformen mit Erbfolge, Wahlen und Putschen, Gesetze, Schrift, Statistiken |
 | ✅ 9 | **Durch die Epochen** | Bronzezeit bis digitales Zeitalter (13 neue Erfindungen, 9 Zeitalter), Gebäude und Kleidung je Epoche, Seefahrt und Städte auf anderen Kontinenten, Leistung für Millionen Menschen |
-| 10 | **Sci-Fi-Zukunft** | Roboter, KI-Wesen, Cyborgs, Klone, fliegende Städte, Wettermaschinen, Zeitmaschinen |
+| ✅ 10 | **Sci-Fi-Zukunft** | Roboter, KI-Wesen und KI-Regierung, Cyborgs, Klone (auch als Kraft), fliegende Städte, Wettermaschinen gegen dein Wetter, Zeitreisende, die Menschen entdecken dich, Aufstand der Maschinen |
 | 11 | **Feinschliff** | Musik pro Epoche, Film-Modus, Ich-Perspektive, Welt teilen (Datei und Code), Balancing |
 
 **Erster spielbarer Prototyp:** Meilensteine 1–3. Schon nach Meilenstein 2

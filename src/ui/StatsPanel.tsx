@@ -13,6 +13,7 @@ const CHARTS: { field: string; unit?: '%' }[] = [
   { field: 'wars' },
   { field: 'inequality', unit: '%' },
   { field: 'price' },
+  { field: 'robots' },
 ];
 
 const W = 300;

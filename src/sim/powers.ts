@@ -23,6 +23,7 @@ export type PowerKind =
   | 'smite'
   | 'plague'
   | 'move'
+  | 'clone'
   | 'luck'
   | 'fertility'
   | 'sign'
@@ -108,6 +109,7 @@ export const LIFE_POWERS: readonly PowerDef[] = [
   { kind: 'smite', target: 'person', catastrophe: false, aimKm: 0, category: 'life' },
   { kind: 'plague', target: 'point', catastrophe: false, aimKm: 450, category: 'life' },
   { kind: 'move', target: 'carry', catastrophe: false, aimKm: 0, category: 'life' },
+  { kind: 'clone', target: 'person', catastrophe: false, aimKm: 0, category: 'life' },
 ];
 
 export const ALL_POWERS: readonly PowerDef[] = [

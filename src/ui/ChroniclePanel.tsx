@@ -7,7 +7,7 @@ import { civName, deityName, geneWords, inventionName, rulerTitle, speciesName }
 import { biomeName } from './format';
 import { IconClose } from './icons';
 
-const FILTERS: (ChronicleCategory | 'all')[] = ['all', 'people', 'love', 'death', 'groups', 'conflict', 'civ', 'knowledge', 'faith', 'animals', 'nature'];
+const FILTERS: (ChronicleCategory | 'all')[] = ['all', 'people', 'love', 'death', 'groups', 'conflict', 'civ', 'future', 'knowledge', 'faith', 'animals', 'nature'];
 type Tab = 'chronicle' | 'knowledge' | 'faith' | 'peoples' | 'animals';
 
 interface Props {
@@ -134,6 +134,7 @@ function FaithList({ info, onPerson, onPlace }: { info: FaithInfo; onPerson: (id
           <b>{t(`faith.image.${info.image}` as MessageKey)}</b> <span class="muted">{t(`faith.imageNote.${info.image}` as MessageKey, { good: formatNumber(info.good), bad: formatNumber(info.bad) })}</span>
         </p>
         <p class="know-meta mono">{t('faith.believers', { n: formatNumber(info.believers), m: formatNumber(info.population) })}</p>
+        {info.found && <p class="faith-found">{t('faith.found')}</p>}
       </div>
       {info.prayers.length > 0 && (
         <div class="faith-prayers">

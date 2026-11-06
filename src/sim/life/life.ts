@@ -29,6 +29,7 @@ import { FaithSystem } from './faith';
 import { TribeSystem } from './tribes';
 import { CivSystem } from './civ';
 import { PoliticsSystem } from './politics';
+import { FutureSystem } from './future';
 import {
   BIT,
   INVENTION_IDS,
@@ -219,6 +220,7 @@ export class Life {
   readonly tribes = new TribeSystem(this);
   readonly civ = new CivSystem(this);
   readonly politics = new PoliticsSystem(this);
+  readonly future = new FutureSystem(this);
   /** The world during a step (not saved). */
   private stepWorld: World | null = null;
   /** How many talks one talk stands for (time skip). */
@@ -835,6 +837,7 @@ export class Life {
 
   /** @internal */
   makeSick(p: Person): void {
+    if (p.kind) return;
     if (p.sick > 0 || p.immune || !p.alive) return;
     if (p.luck !== undefined && p.luck > this.data.t) return;
     p.sick = this.rng.range(4, 9) * DAY;
@@ -939,8 +942,8 @@ export class Life {
     if (st.storm > 0.6) this.hurt(p, 0.02 * st.storm * (sheltered ? 0.3 : 1), 'storm');
     if (!danger) p.flags &= ~(8 | 16);
 
-    // Needs.
-    const appetite = age < 13 ? 0.75 : 1;
+    // Needs (machines run on power: no hunger, no thirst).
+    const appetite = p.kind ? 0 : age < 13 ? 0.75 : 1;
     p.hunger = Math.min(1, p.hunger + 0.42 * dt * appetite);
     p.thirst = Math.min(1, p.thirst + (st.raining ? 0 : 0.55 * dt * appetite));
     if (st.raining) p.thirst = Math.max(0, p.thirst - 0.04 * k);
@@ -1327,7 +1330,7 @@ export class Life {
     const yearly = age < 1 ? 0.03 : age < 5 ? 0.008 : age < 40 ? 0.002 : age < 50 ? 0.008 : age < 60 ? 0.03 : age < 70 ? 0.09 : age < 80 ? 0.2 : 0.4;
     // Healing herbs save many small children.
     const herbs = age < 5 && this.bandKnows(p.band) & BIT.herbs ? 0.6 : 1;
-    if (this.rng.chance((yearly / DAYS_PER_YEAR) * herbs * (p.luck !== undefined ? 0.5 : 1))) {
+    if (this.rng.chance((yearly / DAYS_PER_YEAR) * herbs * (p.luck !== undefined ? 0.5 : 1) * this.future.agingFactor(p))) {
       this.die(p, age < 55 ? 'sickness' : 'age');
       return;
     }
@@ -1379,7 +1382,7 @@ export class Life {
 
   private tryConceive(p: Person, world: World, t: number, age: number): void {
     const q = this.person(p.partner);
-    if (!q?.alive || age < ADULT_AGE || age > 44) return;
+    if (!q?.alive || age < ADULT_AGE || age > 44 || p.kind || q.kind) return;
     if (p.lastBirth !== undefined && t - p.lastBirth < 2 * YEAR) return;
     if (!world.within(p.cell, q.cell, world.kmPerCell * 1.6)) return;
     const fertility = age < 20 ? 0.6 : age < 30 ? 1 : age < 35 ? 0.8 : age < 40 ? 0.5 : 0.2;
@@ -1590,7 +1593,7 @@ export class Life {
   }
 
   private canCourt(p: Person, q: Person, ignorePartner = false): boolean {
-    if (p.sex === q.sex || !p.alive || !q.alive) return false;
+    if (p.sex === q.sex || !p.alive || !q.alive || p.kind || q.kind) return false;
     if (!ignorePartner && (p.partner >= 0 || q.partner >= 0)) return false;
     const ap = this.ageOf(p);
     const aq = this.ageOf(q);
@@ -2968,6 +2971,9 @@ export class Life {
         break;
       case 'smite':
         if (target?.alive) this.die(target, 'god');
+        break;
+      case 'clone':
+        if (target?.alive) this.future.clone(target, world);
         break;
       case 'plague':
         for (const p of within(450)) if (!p.immune && rng.chance(0.6)) this.makeSick(p);

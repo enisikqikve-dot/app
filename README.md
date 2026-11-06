@@ -8,7 +8,22 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 9 – Durch die Epochen ✅
+## Stand: Meilenstein 10 – Sci-Fi-Zukunft ✅
+
+**Neu: Nach dem digitalen Zeitalter wird es verrückt: Roboter, denkende Maschinen, Klone, schwebende Städte. Und die Menschen finden dich.**
+
+- **Sieben Erfindungen der Zukunft:** Roboter, Künstliche Intelligenz, Cyborgs, Klonen, Wettermaschinen, Antigravitation, Zeitmaschine. Dazu zwei Zeitalter: Zukunft und ferne Zukunft.
+- **Roboter:** Fabriken bauen sie, und sie arbeiten in den Städten (gezählt und als Figuren, denen du folgen kannst). Sie essen nicht, werden nicht krank, altern nicht, verlieben sich nicht. In der Statistik gibt es eine eigene Kurve.
+- **KI-Wesen:** denkende Maschinen, die mit erfinden. Ein Volk kann ihnen die Macht übergeben: die **KI-Regierung**.
+- **Cyborgs:** Menschen bekommen Teile aus Metall und Elektronik (zuerst Alte und Verletzte) und leben viel länger.
+- **Klone:** Mächtige lassen sich klonen. Und es gibt eine **neue Kraft „Klonen“** (Leben & Tod): ein Ebenbild mit gleichem Aussehen und Charakter.
+- **Fliegende Städte:** Die größte Stadt eines Volkes hebt auf einem Felsen in den Himmel ab. Beben, Flutwellen, Vulkane und Feuer können ihr nichts mehr anhaben.
+- **Wettermaschinen:** Masten, die Sturm, Dürre und Blitz bändigen, sogar deine. Die Chronik schreibt es auf, wenn dein Wetter an ihnen abprallt.
+- **Zeitmaschinen:** Reisende aus der Zukunft tauchen bei anderen Völkern auf und bringen Wissen mit. Und die Forscher entdecken dich: Jemand lenkt die Welt seit Anbeginn.
+- **Aufstand der Maschinen:** Sind Maschinen nicht gleich vor dem Gesetz, können sie sich erheben und ein eigenes Volk gründen, mit allen Folgen.
+- **Aussehen:** weiße Kuppeln mit Glastürmen, schwebende Felseninseln, Wettermasten, leuchtende Zeitportale. Roboter sind metallgrau, KI-Wesen leuchten blau, Cyborgs tragen Silber, Zeitreisende glänzen.
+
+### Meilenstein 9 – Durch die Epochen ✅
 
 **Neu: Von der Bronzezeit bis ins digitale Zeitalter, mit Städten, die mit jeder Epoche anders aussehen.**
 

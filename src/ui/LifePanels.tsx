@@ -82,14 +82,21 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
         <div>
           <h2 class="place-title">{p.name}</h2>
           <div class="chips">
-            <span class="chip chip-cond">
-              {t(`person.phase.${p.phase}.${p.sex}` as MessageKey)} · {t('person.age', { age: formatNumber(p.age) })}
-            </span>
+            {p.kind ? (
+              <span class="chip chip-cond">{t('person.running', { n: formatNumber(Math.max(0, p.age - 20)) })}</span>
+            ) : (
+              <span class="chip chip-cond">
+                {t(`person.phase.${p.phase}.${p.sex}` as MessageKey)} · {t('person.age', { age: formatNumber(p.age) })}
+              </span>
+            )}
             {!p.alive && <span class="chip chip-dead">{t(p.archived ? 'person.archived' : 'person.dead')}</span>}
             {p.leader && <span class="chip chip-gold">{t('person.leaderChip')}</span>}
             {p.pregnant && <span class="chip chip-cond">{t('person.pregnant')}</span>}
             {p.lucky && <span class="chip chip-gold">{t('person.lucky')}</span>}
             {p.teacher && <span class="chip chip-cond">{t('person.teacherChip')}</span>}
+            {p.kind && <span class="chip chip-cold">{t(`person.kind.${p.kind}` as MessageKey)}</span>}
+            {p.cyborg && <span class="chip chip-cold">{t('person.cyborg')}</span>}
+            {p.traveler && <span class="chip chip-gold">{t('person.traveler')}</span>}
             {p.ruler && <span class="chip chip-gold">{rulerTitle(p.ruler, p.sex)}</span>}
             {p.shaman && <span class="chip chip-gold">{t('person.shamanChip')}</span>}
             {p.standing && <span class={`chip ${p.standing === 'rich' ? 'chip-gold' : 'chip-cond'}`}>{t(`person.${p.standing}` as MessageKey)}</span>}
@@ -185,6 +192,14 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
             </p>
           )}
           {p.wealth !== null && <p class="note">{t('person.wealth', { n: formatNumber(p.wealth) })}</p>}
+          {p.cloneOf && (
+            <p class="note">
+              {t('person.cloneOf')}{' '}
+              <button type="button" class="link-btn" onClick={() => onPerson(p.cloneOf!.id)}>
+                {p.cloneOf.name}
+              </button>
+            </p>
+          )}
         </div>
       )}
 

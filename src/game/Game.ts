@@ -32,7 +32,7 @@ import { Overlay, World, type ClimateShift } from '../sim/world';
 import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
 import { Life, REVIVE_WINDOW, TICK, type EventOutcome } from '../sim/life/life';
 import type { ChronicleKey, SpeciesId } from '../sim/life/types';
-import { epochOf, type CivEpoch } from '../sim/life/civtech';
+import { EPOCHS, epochOf, type CivEpoch } from '../sim/life/civtech';
 import { PeopleInfo, type ChronicleLine, type CivTechInfo, type FaithInfo, type PeoplesInfo, type SettlementInfo, type StatsInfo, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
 import { BIT } from '../sim/life/inventions';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
@@ -79,7 +79,7 @@ interface MemSnapshot {
 }
 
 /** Chronicle lines that also pop up as a message (if important). */
-const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone', 'religion', 'religionGone', 'answered', 'tribe', 'tribeGone', 'contact', 'murder', 'war', 'battle', 'peace', 'conquered', 'civTech', 'settled', 'grew', 'government', 'revolt', 'overseas', 'epoch']);
+const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone', 'religion', 'religionGone', 'answered', 'tribe', 'tribeGone', 'contact', 'murder', 'war', 'battle', 'peace', 'conquered', 'civTech', 'settled', 'grew', 'government', 'revolt', 'overseas', 'epoch', 'clone', 'flyingCity', 'weatherShield', 'timeTraveler', 'godFound', 'uprising']);
 
 /** A running time skip. */
 interface SkipRun {
@@ -137,7 +137,7 @@ export type PlaceCondition =
   | 'blessed'
   | 'plague';
 
-const EPOCH_ORDER: CivEpoch[] = ['stone', 'neolithic', 'civilization', 'bronze', 'antiquity', 'medieval', 'renaissance', 'industrial', 'modern', 'information'];
+const EPOCH_ORDER: CivEpoch[] = ['stone', ...EPOCHS.map(([e]) => e)];
 
 /** The age the world is in (from what people know). */
 export type Epoch = 'none' | 'paleolithic' | 'mesolithic' | Exclude<CivEpoch, 'stone'>;
@@ -1348,7 +1348,7 @@ export class Game {
   }
 
   faithInfo(): FaithInfo {
-    return this.info?.faith() ?? { image: 'distant', good: 0, bad: 0, believers: 0, population: 0, religions: [], prayers: [] };
+    return this.info?.faith() ?? { found: false, image: 'distant', good: 0, bad: 0, believers: 0, population: 0, religions: [], prayers: [] };
   }
 
   /** A group prays to you: tell the player now and then, so they can answer. */

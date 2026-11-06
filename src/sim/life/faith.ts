@@ -30,6 +30,7 @@ const SEEN: Partial<Record<PowerKind, { deity: Deity; gain: number; km: number; 
   drought: { deity: 'wrath', gain: 0.05, km: 600, good: false },
   heal: { deity: 'healer', gain: 0.3, km: 200, good: true },
   revive: { deity: 'healer', gain: 0.6, km: 300, good: true },
+  clone: { deity: 'sky', gain: 0.4, km: 200, good: true },
   fertility: { deity: 'healer', gain: 0.15, km: 100, good: true },
   harvest: { deity: 'harvest', gain: 0.15, km: 450, good: true },
   rain: { deity: 'harvest', gain: 0.08, km: 400, good: true },
@@ -103,7 +104,7 @@ export class FaithSystem {
 
   /** Should this believer pray now (in distress, now and then)? */
   wantsToPray(p: Person, world: World): boolean {
-    if (this.faith(p) < 0.35 || (p.belief ?? -1) < 0) return false;
+    if (p.kind || this.faith(p) < 0.35 || (p.belief ?? -1) < 0) return false;
     const st = world.cellState(p.cell, this.life.t);
     const need: PrayerNeed | null = st.dry > 0.3 || p.thirst > 0.75 ? 'rain' : p.hunger > 0.7 ? 'food' : p.sick > 0 || this.life.stats(p.band).sick ? 'health' : null;
     if (!need || !this.life.rng.chance(0.15)) return false;
@@ -114,6 +115,7 @@ export class FaithSystem {
 
   /** Once a day per person: faith fades a little without rites, pious people wonder; children follow their parents. */
   personDaily(p: Person, age: number): void {
+    if (p.kind) return;
     let f = this.faith(p);
     const pious = p.traits[T_PIOUS];
     // Without your deeds, faith settles at a calm level; miracles lift it higher, then it fades back.
@@ -138,6 +140,7 @@ export class FaithSystem {
 
   /** Believers pass their faith on when they talk. */
   onTalk(p: Person, q: Person, weight: number): void {
+    if (p.kind || q.kind) return;
     const [a, b] = this.faith(p) >= this.faith(q) ? [p, q] : [q, p];
     if ((a.belief ?? -1) < 0 || a.belief === b.belief) return;
     if (this.faith(b) > this.faith(a) * 0.6 && (b.belief ?? -1) >= 0) return;

@@ -108,6 +108,22 @@ export function chronicleText(l: ChronicleLine, planet: string): string {
       return t('chron.revolt', { a, tribe: l.tribe ?? '?' });
     case 'law':
       return t('chron.law', { tribe: l.tribe ?? '?', law: t(`law.${l.s ?? 'theft'}` as MessageKey) });
+    case 'machine':
+      return t(l.s === 'ai' ? 'chron.machine.ai' : 'chron.machine.robot', { a, place: l.place ?? '?' });
+    case 'clone':
+      return t('chron.clone', { a, b });
+    case 'flyingCity':
+      return t('chron.flyingCity', { place: l.place ?? '?' });
+    case 'weatherShield':
+      return t('chron.weatherShield', { place: l.place ?? '?', power: t(`power.${l.s ?? 'storm'}` as MessageKey) });
+    case 'timeTraveler':
+      return l.s
+        ? t('chron.timeTravelerGift', { a, tribe: l.tribe ?? '?', other: l.other ?? '?', tech: civName(l.s) })
+        : t('chron.timeTraveler', { a, tribe: l.tribe ?? '?', other: l.other ?? '?' });
+    case 'godFound':
+      return t('chron.godFound', { tribe: l.tribe ?? '?' });
+    case 'uprising':
+      return t('chron.uprising', { tribe: l.tribe ?? '?', other: l.other ?? '?', place: l.place ?? '?' });
     case 'overseas':
       return t('chron.overseas', { place: l.place ?? '?', from: l.from ?? '?', tribe: l.tribe ?? '?' });
     case 'epoch':

@@ -20,10 +20,11 @@ describe('ages of the world', () => {
     expect(epochOf(0)).toBe('stone');
     expect(epochOf(CIV_BIT.farming)).toBe('neolithic');
     expect(epochOf(all(['farming', 'masonry', 'wheel', 'writing', 'bronze', 'iron']))).toBe('antiquity');
-    expect(epochOf(all(CIV_IDS))).toBe('information');
+    expect(epochOf(all(CIV_IDS))).toBe('farFuture');
+    expect(epochOf(all(CIV_IDS.slice(0, 20)))).toBe('information');
     expect(epochIndex(all(CIV_IDS))).toBe(EPOCHS.length);
-    // Houses: mud, stone, timber, brick, towers.
-    expect([0, 2, 3, 4, 5, 6, 7, 8, 9].map(styleFor)).toEqual([0, 0, 1, 1, 2, 2, 3, 4, 4]);
+    // Houses: mud, stone, timber, brick, towers, domes of the future.
+    expect([0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(styleFor)).toEqual([0, 0, 1, 1, 2, 2, 3, 4, 4, 5, 5]);
   });
 
   it('writes the start of a new age into the chronicle once', () => {

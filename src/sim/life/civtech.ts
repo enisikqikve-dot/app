@@ -27,6 +27,13 @@ export const CIV_IDS = [
   'vaccines',
   'flight',
   'computer',
+  'robots',
+  'ai',
+  'cyborgs',
+  'cloning',
+  'weather',
+  'antigravity',
+  'timeTravel',
 ] as const;
 export type CivId = (typeof CIV_IDS)[number];
 
@@ -66,6 +73,13 @@ export const CIV_TECHS: Record<CivId, CivTechDef> = {
   vaccines: { needs: ['medicine', 'steam'], stone: [], rate: 0.0003, settled: true, minPop: 5000 },
   flight: { needs: ['electricity'], stone: [], rate: 0.0003, settled: true, minPop: 8000 },
   computer: { needs: ['electricity'], stone: [], rate: 0.0003, settled: true, minPop: 10000 },
+  robots: { needs: ['computer'], stone: [], rate: 0.0005, settled: true, minPop: 20000 },
+  ai: { needs: ['computer', 'robots'], stone: [], rate: 0.0004, settled: true, minPop: 20000 },
+  cyborgs: { needs: ['robots', 'vaccines'], stone: [], rate: 0.0005, settled: true, minPop: 20000 },
+  cloning: { needs: ['vaccines', 'computer'], stone: [], rate: 0.0005, settled: true, minPop: 20000 },
+  weather: { needs: ['flight', 'computer'], stone: [], rate: 0.0004, settled: true, minPop: 20000 },
+  antigravity: { needs: ['ai', 'flight'], stone: [], rate: 0.0003, settled: true, minPop: 30000 },
+  timeTravel: { needs: ['ai', 'antigravity'], stone: [], rate: 0.0002, settled: true, minPop: 30000 },
 };
 
 /** The ages of the world, each begun by any of these pieces of knowledge (in order). */
@@ -79,6 +93,8 @@ export const EPOCHS = [
   ['industrial', ['steam']],
   ['modern', ['electricity']],
   ['information', ['computer']],
+  ['future', ['robots', 'ai', 'cloning']],
+  ['farFuture', ['antigravity', 'timeTravel']],
 ] as const;
 export type CivEpoch = 'stone' | (typeof EPOCHS)[number][0];
 

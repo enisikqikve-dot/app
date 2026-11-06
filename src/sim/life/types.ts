@@ -95,7 +95,11 @@ export type LogKey =
   | 'settled'
   | 'ruler'
   | 'elected'
-  | 'inherited';
+  | 'inherited'
+  | 'built'
+  | 'cyborg'
+  | 'cloned'
+  | 'arrived';
 
 export interface LogEntry {
   t: number;
@@ -230,6 +234,14 @@ export interface Person {
   crimes?: number;
   /** Money and goods (once there is money). */
   wealth?: number;
+  /** Not a human: a robot or a being of artificial intelligence. */
+  kind?: 'robot' | 'ai';
+  /** Part machine. */
+  cyborg?: boolean;
+  /** Cloned from this person. */
+  cloneOf?: number;
+  /** Came from the future in a time machine. */
+  traveler?: boolean;
 
   /** Cell the person is in (or leaving). */
   cell: number;
@@ -335,11 +347,17 @@ export interface Settlement {
   wall?: boolean;
   /** Blessed harvest until then. */
   blessed?: number;
+  /** Counted robots living and working there. */
+  robots?: number;
+  /** Floats in the sky; has a weather machine; has a time machine. */
+  flying?: boolean;
+  weatherMachine?: boolean;
+  timeMachine?: boolean;
   ended?: number;
 }
 
-export type GovForm = 'band' | 'elders' | 'monarchy' | 'theocracy' | 'republic' | 'democracy' | 'dictatorship';
-export const GOV_FORMS: GovForm[] = ['band', 'elders', 'monarchy', 'theocracy', 'republic', 'democracy', 'dictatorship'];
+export type GovForm = 'band' | 'elders' | 'monarchy' | 'theocracy' | 'republic' | 'democracy' | 'dictatorship' | 'ai';
+export const GOV_FORMS: GovForm[] = ['band', 'elders', 'monarchy', 'theocracy', 'republic', 'democracy', 'dictatorship', 'ai'];
 export type LawId = 'theft' | 'murder' | 'tax' | 'faith' | 'peace' | 'equality' | 'market';
 
 /** A people: groups that share an origin, a name and a culture. */
@@ -350,7 +368,7 @@ export interface Tribe {
   /** Colour of its clothes and banners (0 … 1). */
   hue: number;
   /** How it came to be, and the people it split from. */
-  origin: 'first' | 'split' | 'far' | 'appeared';
+  origin: 'first' | 'split' | 'far' | 'appeared' | 'machines';
   parent?: number;
   /** The leader of its largest group. */
   chief: number;
@@ -483,7 +501,14 @@ export type ChronicleKey =
   | 'revolt'
   | 'law'
   | 'overseas'
-  | 'epoch';
+  | 'epoch'
+  | 'machine'
+  | 'clone'
+  | 'flyingCity'
+  | 'weatherShield'
+  | 'timeTraveler'
+  | 'godFound'
+  | 'uprising';
 
 /** One line in the world chronicle. */
 export interface ChronicleEntry {
@@ -577,6 +602,8 @@ export interface LifeData {
   settlements?: Settlement[];
   /** The latest age any people has reached (index into EPOCHS + 1). */
   epochRecord?: number;
+  /** The people found out that you exist (with time machines). */
+  godFound?: boolean;
   /** Append-only: one row of numbers per year (see HISTORY_FIELDS). */
   history?: number[][];
   historyCount?: number;

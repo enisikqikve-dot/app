@@ -582,7 +582,7 @@ export class TribeSystem {
       const know = life.bandKnows(band.id);
       const tr = this.tribe(band.tribe);
       const k = (id: Parameters<typeof civ.knows>[1], f: number) => (civ.knows(tr, id) ? f : 0);
-      const arms = 1 + (know & BIT.spear ? 0.3 : 0) + (know & BIT.bow ? 0.4 : 0) + k('bronze', 0.3) + k('iron', 0.4) + k('gunpowder', 0.9) + k('steam', 0.4) + k('flight', 0.7) + k('computer', 0.4);
+      const arms = 1 + (know & BIT.spear ? 0.3 : 0) + (know & BIT.bow ? 0.4 : 0) + k('bronze', 0.3) + k('iron', 0.4) + k('gunpowder', 0.9) + k('steam', 0.4) + k('flight', 0.7) + k('computer', 0.4) + life.future.warBonus(tr);
       return list.reduce((s, p) => s + 0.5 + p.traits[T_BRAVE] / 200 + p.traits[T_AGGRESSIVE] / 250 + (p.feel?.kind === 'courage' ? 0.4 : 0) - (p.feel?.kind === 'fear' ? 0.3 : 0), 0) * arms * (home ? 1.15 : 1);
     };
     const pa = power(fa, ga, false);

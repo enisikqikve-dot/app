@@ -29,7 +29,13 @@ const EPOCH_CLOTHES = [
   [0x7a2e2e, 0x2e4a7a, 0x3e6a3a, 0x6a4a2a, 0x8a7a5a],
   [0x3a3a40, 0x5a4a3a, 0x2e3a4a, 0x6a6a6a, 0x4a2e2e],
   [0x3a6ad8, 0xd84a4a, 0xe8b830, 0x2ea86a, 0xe8e8e8],
+  [0xf0f4f8, 0xc8d4e0, 0x5ad8ff, 0xff5ab4, 0x9aff6a],
 ];
+/** Machines and people with machine parts. */
+const ROBOT = { body: new THREE.Color(0x9aa4ae), head: new THREE.Color(0xc8d0d8), cap: new THREE.Color(0x3ad0ff) };
+const AI = { body: new THREE.Color(0x58d4ff), head: new THREE.Color(0xbff2ff), cap: new THREE.Color(0xffffff) };
+const CYBORG_CAP = new THREE.Color(0xb8c4d0);
+const TRAVELER = new THREE.Color(0xe8f4ff);
 const MAX_PEOPLE = 360;
 const MAX_GRAVES = 400;
 const MAX_STRUCTURES = 240;
@@ -483,15 +489,21 @@ export class LifeView {
       this.body.setMatrixAt(n, this.m);
       this.head.setMatrixAt(n, this.m);
       this.hair.setMatrixAt(n, this.m);
-      if (p.alive) {
+      if (p.alive && p.kind) {
+        const m = p.kind === 'ai' ? AI : ROBOT;
+        this.body.setColorAt(n, m.body);
+        this.head.setColorAt(n, m.head);
+        this.hair.setColorAt(n, m.cap);
+      } else if (p.alive) {
         const style = this.bandStyle.get(p.band) ?? 0;
         const later = EPOCH_CLOTHES[style];
         this.c.setHex(later ? later[p.look.clothes % later.length] : (CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]));
         const tribe = this.tribeColor.get(p.band);
         if (tribe) this.c.lerp(tribe, 0.45);
+        if (p.traveler) this.c.copy(TRAVELER);
         this.body.setColorAt(n, this.c);
         this.head.setColorAt(n, this.c.copy(SKIN_LIGHT).lerp(SKIN_DARK, p.look.skin));
-        this.hair.setColorAt(n, this.c.setHex(HAIR_COLORS[age >= 52 ? HAIR_GREY : p.look.hair] ?? HAIR_COLORS[0]));
+        this.hair.setColorAt(n, p.cyborg ? CYBORG_CAP : this.c.setHex(HAIR_COLORS[age >= 52 ? HAIR_GREY : p.look.hair] ?? HAIR_COLORS[0]));
       } else {
         this.body.setColorAt(n, DEAD);
         this.head.setColorAt(n, DEAD);

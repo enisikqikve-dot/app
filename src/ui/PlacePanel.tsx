@@ -56,6 +56,10 @@ export function PlacePanel({ place, onClose }: { place: PlaceInfo; onClose: () =
               place.settlement.size >= 1 ? t('town.price', { n: formatNumber(place.settlement.price) }) : '',
               place.settlement.temple ? t('town.temple') : '',
               place.settlement.wall ? t('town.wall') : '',
+              place.settlement.robots ? t('town.robots', { n: formatNumber(place.settlement.robots) }) : '',
+              place.settlement.flying ? t('town.flying') : '',
+              place.settlement.weatherMachine ? t('town.weather') : '',
+              place.settlement.timeMachine ? t('town.timeMachine') : '',
             ]
               .filter(Boolean)
               .join(' · ')}

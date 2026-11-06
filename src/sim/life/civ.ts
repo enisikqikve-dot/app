@@ -28,7 +28,7 @@ const MAX_SETTLEMENTS = 40;
 const PER_FIELD = 22;
 
 /** What one row of the yearly statistics holds. */
-export const HISTORY_FIELDS = ['year', 'population', 'followed', 'peoples', 'settlements', 'believers', 'knowledge', 'wars', 'inequality', 'price'] as const;
+export const HISTORY_FIELDS = ['year', 'population', 'followed', 'peoples', 'settlements', 'believers', 'knowledge', 'wars', 'inequality', 'price', 'robots'] as const;
 
 const SYL_A = ['Ur', 'Ka', 'Ta', 'Me', 'Bo', 'Si', 'Al', 'No', 'Ri', 'Pe', 'Ha', 'Lu', 'Za', 'Dé', 'Mo', 'Ve', 'Ki', 'Ar'];
 const SYL_B = ['ru', 'ma', 'lin', 'do', 'ka', 'sa', 'ri', 'tem', 'no', 'bar', 'el', 'ish', 'an', 'ur'];
@@ -71,9 +71,10 @@ export class CivSystem {
     return this.settlements.find((s) => s.id === id);
   }
 
-  /** Everyone: the people you can follow plus the counted crowds. */
+  /** Everyone: the people you can follow plus the counted crowds (not counting machines). */
   totalPopulation(): number {
-    let n = this.life.population();
+    let n = 0;
+    for (const p of this.life.people) if (p.alive && !p.kind) n++;
     for (const s of this.settlements) if (s.ended === undefined) n += Math.floor(s.crowd);
     return n;
   }
@@ -270,8 +271,12 @@ export class CivSystem {
     }
     const harm = HARM[e.kind];
     if (!harm) return;
+    const shielded = this.life.future.shields(e, world);
     for (const s of this.living()) {
       if (!world.within(s.cell, e.cell, harm[0])) continue;
+      // Weather machines tame the weather; flying cities float above quakes and waves.
+      if (shielded && s.weatherMachine) continue;
+      if (s.flying && (e.kind === 'quake' || e.kind === 'tsunami' || e.kind === 'volcano' || e.kind === 'fire')) continue;
       const share = e.kind === 'tsunami' && world.planet.heightM[s.cell] > 60 ? harm[1] * 0.2 : harm[1];
       s.crowd = Math.round(s.crowd * (1 - share) * 100) / 100;
     }
@@ -336,6 +341,7 @@ export class CivSystem {
     const life = this.life;
     for (const tribe of life.tribes.living()) this.discover(tribe, world);
     for (const s of this.living()) this.grow(s, world, t);
+    this.life.future.yearly(world, t);
     this.record(t);
   }
 
@@ -568,6 +574,7 @@ export class CivSystem {
       life.tribes.wars.filter((w) => w.end === undefined).length,
       Math.round(this.inequality() * 100),
       price,
+      homes.reduce((n, h) => n + (h.robots ?? 0), 0),
     ]);
   }
 }

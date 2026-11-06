@@ -142,6 +142,50 @@ function towerGeometry(): THREE.BufferGeometry {
   return g;
 }
 
+/** The future: white domes with slender glass spires. */
+function domeGeometry(): THREE.BufferGeometry {
+  const g = mergeGeometries([
+    painted(new THREE.SphereGeometry(0.15, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), 0xffffff),
+    painted(new THREE.CylinderGeometry(0.02, 0.035, 0.5, 6).translate(0, 0.3, 0), 0x7fe6ff),
+    painted(new THREE.SphereGeometry(0.03, 8, 6).translate(0, 0.56, 0), 0xbff6ff),
+    painted(new THREE.TorusGeometry(0.155, 0.012, 4, 16).rotateX(Math.PI / 2).translate(0, 0.01, 0), 0x5ad8ff),
+  ])!;
+  g.computeVertexNormals();
+  return g;
+}
+
+/** The rock a flying city floats on (an upside-down cone). */
+function islandGeometry(): THREE.BufferGeometry {
+  const g = mergeGeometries([
+    painted(new THREE.ConeGeometry(1, 1.3, 9, 1).rotateX(Math.PI).translate(0, -0.65, 0), 0x8a7a68),
+    painted(new THREE.CylinderGeometry(1, 1, 0.08, 9).translate(0, -0.04, 0), 0x4f7a3a),
+  ])!;
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A weather machine: a mast with rings that reach for the clouds. */
+function mastGeometry(): THREE.BufferGeometry {
+  const g = mergeGeometries([
+    painted(new THREE.CylinderGeometry(0.02, 0.05, 0.9, 6).translate(0, 0.45, 0), 0xdde6ee),
+    painted(new THREE.TorusGeometry(0.12, 0.015, 4, 14).rotateX(Math.PI / 2).translate(0, 0.6, 0), 0x5ad8ff),
+    painted(new THREE.TorusGeometry(0.08, 0.012, 4, 12).rotateX(Math.PI / 2).translate(0, 0.78, 0), 0x5ad8ff),
+    painted(new THREE.SphereGeometry(0.04, 8, 6).translate(0, 0.92, 0), 0xffffff),
+  ])!;
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A time machine: a glowing ring standing on its edge. */
+function portalGeometry(): THREE.BufferGeometry {
+  const g = mergeGeometries([
+    painted(new THREE.TorusGeometry(0.18, 0.03, 6, 20).translate(0, 0.22, 0), 0xc070ff),
+    painted(new THREE.BoxGeometry(0.3, 0.04, 0.12).translate(0, 0.02, 0), 0x40405a),
+  ])!;
+  g.computeVertexNormals();
+  return g;
+}
+
 /** A columned temple (antiquity). */
 function columnTempleGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [painted(new THREE.BoxGeometry(0.62, 0.05, 0.4).translate(0, 0.025, 0), 0xe8e2d4)];
@@ -230,6 +274,7 @@ const STYLE_COLORS = [
   [0xf2ecdc, 0xe9e0c8, 0xf5f0e4, 0xe0d4b8, 0xefe6d0],
   [0xa0503c, 0x8e4634, 0xb05c44, 0x7e4232, 0x9a5a48],
   [0xb8c4d0, 0xa8b4c2, 0xc8d2dc, 0x98a6b6, 0xd0d8e0],
+  [0xffffff, 0xf2f6fa, 0xe8f0f8, 0xf8f4ff, 0xeef8ff],
 ].map((list) => list.map((c) => new THREE.Color(c)));
 
 export class TownView {
@@ -241,6 +286,11 @@ export class TownView {
   private shipLanes: { base: THREE.Vector3; out: THREE.Vector3; phase: number; cell: number }[] = [];
   private readonly columnTemples: THREE.InstancedMesh;
   private readonly cathedrals: THREE.InstancedMesh;
+  private readonly islands: THREE.InstancedMesh;
+  private readonly masts: THREE.InstancedMesh;
+  private readonly portals: THREE.InstancedMesh;
+  /** Height above the ground for the place being laid out (flying cities). */
+  private lift = 0;
   private houses: THREE.InstancedMesh;
   private readonly fields: THREE.InstancedMesh;
   private readonly temples: THREE.InstancedMesh;
@@ -268,20 +318,23 @@ export class TownView {
     this.kmPerUnit = planet.radiusKm / R;
     this.cellAngle = Math.sqrt((4 * Math.PI) / planet.cellCount);
     const mat = (rough: number) => new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: rough });
-    this.styles = [houseGeometry(), stoneHouseGeometry(), timberHouseGeometry(), brickHouseGeometry(), towerGeometry()].map((g) => {
+    this.styles = [houseGeometry(), stoneHouseGeometry(), timberHouseGeometry(), brickHouseGeometry(), towerGeometry(), domeGeometry()].map((g) => {
       const m = new THREE.InstancedMesh(g, mat(0.9), MAX_HOUSES);
       m.setColorAt(0, WALL_COLOR);
       return m;
     });
     this.houses = this.styles[0];
     this.ships = new THREE.InstancedMesh(shipGeometry(), mat(0.8), MAX_SHIPS);
+    this.islands = new THREE.InstancedMesh(islandGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1, emissive: 0x3a3026 }), MAX_TEMPLES);
+    this.masts = new THREE.InstancedMesh(mastGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.5, emissive: 0x0a3040 }), MAX_TEMPLES);
+    this.portals = new THREE.InstancedMesh(portalGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.4, emissive: 0x3a1050 }), MAX_TEMPLES);
     this.columnTemples = new THREE.InstancedMesh(columnTempleGeometry(), mat(0.85), MAX_TEMPLES);
     this.cathedrals = new THREE.InstancedMesh(cathedralGeometry(), mat(0.85), MAX_TEMPLES);
     this.fields = new THREE.InstancedMesh(fieldGeometry(), mat(1), MAX_FIELDS);
     this.temples = new THREE.InstancedMesh(templeGeometry(), mat(0.9), MAX_TEMPLES);
     this.walls = new THREE.InstancedMesh(wallGeometry(), mat(0.95), MAX_WALLS);
     this.fields.setColorAt(0, WALL_COLOR);
-    for (const mesh of [...this.styles, this.fields, this.temples, this.columnTemples, this.cathedrals, this.walls, this.ships]) {
+    for (const mesh of [...this.styles, this.fields, this.temples, this.columnTemples, this.cathedrals, this.walls, this.ships, this.islands, this.masts, this.portals]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
       this.group.add(mesh);
@@ -319,8 +372,9 @@ export class TownView {
   private place(cell: number, spotKm: [number, number], yaw: number, scale: number | THREE.Vector3): THREE.Matrix4 | null {
     entityDir(this.planet, cell, -1, 0, spotKm, this.v);
     const c = nearestCell(this.planet, this.v.x, this.v.y, this.v.z, cell);
-    if (this.planet.heightM[c] < 0) return null;
+    if (this.planet.heightM[c] < 0 && !this.lift) return null;
     this.terrain.groundAt(this.v, c, this.w);
+    if (this.lift) this.w.addScaledVector(this.v, this.lift);
     orient(this.v, yaw, this.q);
     if (typeof scale === 'number') this.s.setScalar(scale);
     else this.s.copy(scale);
@@ -329,13 +383,15 @@ export class TownView {
 
   update(life: Life, near: boolean, cameraDistance: number, sunDir: THREE.Vector3, gameMinutes: number, nowMs: number): void {
     const towns = life.civ.living();
-    const sig = towns.map((s) => `${s.id}:${houseCount(life.civ.inhabitants(s))}:${Math.min(36, s.fields)}:${s.temple ? 1 : 0}${s.wall ? 1 : 0}:${this.ageOf(life, s)}`).join('|');
+    const sig = towns
+      .map((s) => `${s.id}:${houseCount(life.civ.inhabitants(s))}:${Math.min(36, s.fields)}:${s.temple ? 1 : 0}${s.wall ? 1 : 0}${s.flying ? 1 : 0}${s.weatherMachine ? 1 : 0}${s.timeMachine ? 1 : 0}:${this.ageOf(life, s)}`)
+      .join('|');
     if (sig !== this.signature || nowMs - this.lastBuild > 4000) {
       this.signature = sig;
       this.lastBuild = nowMs;
       this.build(life, towns);
     }
-    for (const m of [...this.styles, this.fields, this.temples, this.columnTemples, this.cathedrals, this.walls, this.ships]) m.visible = near;
+    for (const m of [...this.styles, this.fields, this.temples, this.columnTemples, this.cathedrals, this.walls, this.ships, this.islands, this.masts, this.portals]) m.visible = near;
     // Ships sail out and back along their lanes.
     const tsec = nowMs / 1000;
     let k = 0;
@@ -394,7 +450,10 @@ export class TownView {
 
   private build(life: Life, towns: Settlement[]): void {
     const kmu = this.kmPerUnit;
-    const counts = [0, 0, 0, 0, 0];
+    const counts = [0, 0, 0, 0, 0, 0];
+    let isl = 0;
+    let mst = 0;
+    let prt = 0;
     let ct = 0;
     let cc = 0;
     this.shipLanes = [];
@@ -409,6 +468,8 @@ export class TownView {
       const style = styleFor(age);
       this.houses = this.styles[style];
       h = counts[style];
+      // A flying city floats high above its fields on a rock of its own.
+      this.lift = s.flying ? 3.2 * (R / 100) : 0;
       // Ships for seafaring peoples, sailing from the shore.
       const tribe = life.tribes.tribe(s.tribe);
       if (tribe && life.civ.knows(tribe, 'sailing')) {
@@ -435,10 +496,10 @@ export class TownView {
         const m = this.place(s.cell, [Math.cos(a) * r, Math.sin(a) * r], a + Math.PI + (hash(s.id + i) - 0.5) * 0.6, 1.25 + hash(s.id * 7 + i) * 0.25);
         if (!m) continue;
         outer = Math.max(outer, r);
-        if (style === 4) {
+        if (style >= 4) {
           // Towers: taller near the centre and in bigger cities.
           const tall = (0.4 + Math.max(0, Math.min(4, Math.log10(Math.max(10, people)) - 2)) * (1.2 - i / count) + hash(s.id * 5 + i) * 0.5) * (age >= 9 ? 1.3 : 1);
-          m.multiply(new THREE.Matrix4().makeScale(1, Math.max(0.5, tall), 1));
+          m.multiply(new THREE.Matrix4().makeScale(1, Math.max(0.5, style === 5 ? tall * 0.6 : tall), 1));
         }
         this.houses.setMatrixAt(h, m);
         this.houses.setColorAt(h, this.houseColor(style, s.id * 13 + i));
@@ -446,6 +507,21 @@ export class TownView {
         made++;
       }
       counts[style] = h;
+      if (s.flying && isl < MAX_TEMPLES) {
+        const m = this.place(s.cell, [0, 0], seed, 1);
+        if (m) {
+          const r = Math.max(0.9, outer / kmu + 0.5);
+          this.islands.setMatrixAt(isl++, m.multiply(new THREE.Matrix4().makeScale(r, Math.min(r * 0.45, 2), r)));
+        }
+      }
+      if (s.weatherMachine && mst < MAX_TEMPLES) {
+        const m = this.place(s.cell, [Math.cos(seed + 2) * (outer + 0.3 * kmu), Math.sin(seed + 2) * (outer + 0.3 * kmu)], seed, 1.6);
+        if (m) this.masts.setMatrixAt(mst++, m);
+      }
+      if (s.timeMachine && prt < MAX_TEMPLES) {
+        const m = this.place(s.cell, [Math.cos(seed + 4) * (outer + 0.3 * kmu), Math.sin(seed + 4) * (outer + 0.3 * kmu)], seed + 4, 1.6);
+        if (m) this.portals.setMatrixAt(prt++, m);
+      }
       if (s.temple) {
         const m = this.place(s.cell, [0, 0], seed, 1.4);
         if (m && style === 0 && tp < MAX_TEMPLES) this.temples.setMatrixAt(tp++, m);
@@ -461,6 +537,8 @@ export class TownView {
           if (m) this.walls.setMatrixAt(wl++, m);
         }
       }
+      // Fields stay on the ground.
+      this.lift = 0;
       const fields = Math.min(36, s.fields);
       const ring = outer + 0.75 * kmu;
       for (let i = 0, made = 0; made < fields && i < fields * 3 && f < MAX_FIELDS; i++) {
@@ -481,6 +559,9 @@ export class TownView {
       [this.columnTemples, ct],
       [this.cathedrals, cc],
       [this.walls, wl],
+      [this.islands, isl],
+      [this.masts, mst],
+      [this.portals, prt],
     ] as const) {
       mesh.count = count;
       mesh.instanceMatrix.needsUpdate = true;
