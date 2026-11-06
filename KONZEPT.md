@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 6. November 2026 · Version 2.0 · Phase: alle Meilensteine fertig
+Stand: 6. November 2026 · Version 2.1 · Phase: Version 2.0 fertig, Ausbau (Meilensteine 12–15) geplant
 
 ---
 
@@ -112,6 +112,31 @@ ist: Was wird aus deiner Welt?
 | 18 | Extras | **Zurückspulen, Zeitsprung, Welt teilen** |
 | 19 | Zukunft | **Verrückte Sci-Fi:** Cyborgs, Klone, fliegende Städte, Zeitmaschinen |
 | 20 | Name | **eNis** |
+
+### Runde 3: Ausbau nach Version 2.0
+
+| # | Frage | Deine Antwort |
+|---|---|---|
+| 1 | Tempo der Geschichte | **So lassen:** realistisch langsam |
+| 2 | Zeitsprung | **Neu: bis zum nächsten großen Ereignis** |
+| 3 | Meldungen | **So lassen** |
+| 4 | Start einer Welt | **Startzahl wählbar** (2 bis 50 Menschen) |
+| 5 | Neue Kräfte | **Alle:** Himmelsereignisse (Finsternis, Komet, Nordlicht), Wunderbauwerk, Träume an ein ganzes Volk, Tierwunder |
+| 6 | Verehrung | **Opfer und Feste, Tempel für dich, sichtbare Gebete** (🙏🌧️) |
+| 7 | Grenzen der Macht | **Unbegrenzt** (Sandbox) |
+| 8 | Ziele | **Spiel ohne Ende:** keine Ziele, es läuft endlos weiter, auch nach der fernen Zukunft |
+| 9 | Mehr Leben | **Alles:** Feste und Hochzeiten, Lebensträume, sichtbare Berufe, Freundschaften, Rivalen und Fehden |
+| 10 | Aussehen der Menschen | **Viel mehr Details:** Arme, Beine, Gesichter, Bewegungen |
+| 11 | Chronik | **Zusätzlich als Buch** mit Kapiteln je Epoche; die Liste bleibt |
+| 12 | Kartenansichten | **Völker und Grenzen, Bevölkerung, Klima und Nahrung** |
+| 13 | Wetter | **Regen und Schnee, Schnee auf Dächern, Nebel und Gewitter** |
+| 14 | Weltall | **Raumfahrt mit Mondbasis und Satelliten** |
+| 15 | Grafik | **Qualität wählbar** (niedrig / mittel / hoch) |
+| 16 | Spielstände | **Automatische Sicherungen** (alle 1000 Jahre) |
+| 17 | Sprachen | **Deutsch und Englisch reichen** |
+| 18 | Musik | **So lassen** |
+| 19 | Handy | **Einfacher Modus:** weniger Knöpfe, Kräfte im Ring um den Finger |
+| 20 | Zuerst bauen | **Lebendigere Menschen** |
 
 ---
 
@@ -938,6 +963,10 @@ nächsten Schritte.
 | ✅ 9 | **Durch die Epochen** | Bronzezeit bis digitales Zeitalter (13 neue Erfindungen, 9 Zeitalter), Gebäude und Kleidung je Epoche, Seefahrt und Städte auf anderen Kontinenten, Leistung für Millionen Menschen |
 | ✅ 10 | **Sci-Fi-Zukunft** | Roboter, KI-Wesen und KI-Regierung, Cyborgs, Klone (auch als Kraft), fliegende Städte, Wettermaschinen gegen dein Wetter, Zeitreisende, die Menschen entdecken dich, Aufstand der Maschinen |
 | ✅ 11 | **Feinschliff** | Musik pro Epoche (live erzeugt), Film-Modus mit Untertiteln, Ich-Perspektive, Welt teilen als Datei und als Code mit ganzer Geschichte, Balancing |
+| 12 | **Lebendigere Menschen** | detailreiche Figuren mit Armen, Beinen, Gesichtern und Bewegungen; sichtbare Berufe; Feste, Hochzeiten und Trauerzüge; Lebensträume; beste Freunde, Rivalen und Familienfehden |
+| 13 | **Neue Kräfte & Verehrung** | Finsternis, Komet, Nordlicht; Wunderbauwerk; Träume an ein ganzes Volk; Tierwunder; Opfer und Feste; Tempel für dich; Gebete über den Köpfen |
+| 14 | **Welt & Weltall** | Kartenansichten (Völker und Grenzen, Bevölkerung, Klima und Nahrung); Regen, Schnee auf Dächern, Nebel, Gewitter; Raketen, Satelliten und Mondbasis |
+| 15 | **Komfort** | Zeitsprung bis zum nächsten Ereignis; Startzahl wählbar; Chronik als Buch; Qualitätsstufen; automatische Sicherungen; einfacher Handy-Modus; Spiel ohne Ende nach der fernen Zukunft |
 
 **Erster spielbarer Prototyp:** Meilensteine 1–3. Schon nach Meilenstein 2
 kannst du Blitze, Vulkane und Meteoriten auf deinen Planeten werfen. Nach
