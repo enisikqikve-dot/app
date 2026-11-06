@@ -930,7 +930,8 @@ export class World {
     this.igniteFire(e, origins, rng, 160, false);
 
     // Ash falls downwind.
-    const ashCenter = this.trackCells(summit, rng.range(0, Math.PI * 2), 260, 1).path.at(-1) ?? summit;
+    const ashPath = this.trackCells(summit, rng.range(0, Math.PI * 2), 260, 1).path;
+    const ashCenter = ashPath.length > 0 ? ashPath[ashPath.length - 1] : summit;
     const ashRadius = 700;
     const ash = this.cellsWithin(ashCenter, ashRadius);
     this.addScar(e.id, 'ash', e.minutes, ash.cells, ash.dist.map((d) => (d / ashRadius) * 0.6 * DAY), ash.dist.map((d) => 1 - d / ashRadius), {

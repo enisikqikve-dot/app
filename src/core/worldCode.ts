@@ -32,7 +32,8 @@ export function encodeWorldCode(spec: WorldSpec): string {
 }
 
 /** Parses a world code. Accepts lower case, missing dashes and a missing prefix. */
-export function decodeWorldCode(input: string): WorldSpec | null {
+export function decodeWorldCode(input: unknown): WorldSpec | null {
+  if (typeof input !== 'string') return null;
   let text = input.toUpperCase().replace(/[^0-9A-Z]/g, '');
   if (text.startsWith(PREFIX)) text = text.slice(PREFIX.length);
   if (text.length !== 8) return null;

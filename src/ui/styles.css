@@ -1052,3 +1052,21 @@ input:focus-visible {
     letter-spacing: -0.02em;
   }
 }
+
+.error-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+}
+.error-detail {
+  margin: 0;
+  max-width: min(46ch, calc(100vw - 32px));
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.loading-orb.is-broken {
+  animation: none;
+  filter: grayscale(0.8) brightness(0.7);
+}

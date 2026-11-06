@@ -49,6 +49,9 @@ import {
   type OngoingView,
 } from '../render/fx/effects';
 import { SoundEngine, type SoundName } from '../audio/sound';
+import { parseSaveData, sanitizeEvents, type SaveData } from './saveData';
+
+export type { SaveData };
 
 const SAVE_KEY = 'enis.save.v2';
 const OLD_SAVE_KEY = 'enis.save.v1';
@@ -113,13 +116,8 @@ export interface UiState {
   eventCount: number;
   soundOn: boolean;
   notice: Notice | null;
-}
-
-export interface SaveData {
-  code: string;
-  minutes: number;
-  speedIndex: SpeedIndex;
-  events?: PowerEvent[];
+  /** Set when the planet could not be built. */
+  error: string | null;
 }
 
 interface PlanetScene {
@@ -223,6 +221,7 @@ export class Game {
       eventCount: 0,
       soundOn: this.sound.enabled,
       notice: null,
+      error: null,
     });
 
     const resize = () => this.resize();
@@ -252,15 +251,36 @@ export class Game {
       try {
         const raw = safeStorage.get(key);
         if (!raw) continue;
-        const data = JSON.parse(raw) as SaveData;
-        if (typeof data.code !== 'string' || typeof data.minutes !== 'number') continue;
-        if (data.events && !Array.isArray(data.events)) data.events = [];
-        return data;
+        const data = parseSaveData(JSON.parse(raw));
+        if (data) return data;
       } catch {
         /* try the next one */
       }
     }
     return null;
+  }
+
+  /**
+   * Starts the game. If a saved world cannot be rebuilt, it falls back to the same planet
+   * without the saved events, then to a fresh planet, and finally shows the error.
+   */
+  async start(spec: WorldSpec, save: SaveData | null): Promise<void> {
+    const attempts: (() => Promise<void>)[] = [
+      () => this.createWorld(spec, save?.minutes, save?.speedIndex === 0 ? 1 : save?.speedIndex, save?.events ?? []),
+      () => this.createWorld(spec),
+      () => this.createWorld({ seed: randomSeed(), size: 'medium' }),
+    ];
+    let lastError: unknown = null;
+    for (const attempt of attempts) {
+      try {
+        await attempt();
+        return;
+      } catch (err) {
+        lastError = err;
+        console.error('eNis: could not build the planet', err);
+      }
+    }
+    this.ui.set({ loading: false, error: lastError instanceof Error ? lastError.message : String(lastError) });
   }
 
   snapshot(): SaveData | null {
@@ -282,15 +302,17 @@ export class Game {
 
   /** Builds a new planet. Runs on the next frames so the loading screen can show. */
   async createWorld(spec: WorldSpec, startMinutes?: number, speedIndex?: SpeedIndex, events: PowerEvent[] = []): Promise<void> {
-    this.ui.set({ loading: true, place: null });
+    this.ui.set({ loading: true, place: null, error: null });
     this.selectedCell = null;
     this.marker.hide();
     this.arm(null);
-    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
+    // Let the loading screen paint first (a timer, not requestAnimationFrame, which some viewers pause).
+    await new Promise((resolve) => setTimeout(resolve, 40));
 
     this.disposeWorld();
     const planet = generatePlanet(spec.seed, spec.size);
     const world = new World(planet);
+    events = sanitizeEvents(events, planet.cellCount);
     if (events.length > 0) world.rebuild(events);
     this.nextEventId = events.reduce((m, e) => Math.max(m, e.id), 0) + 1;
     this.spec = spec;

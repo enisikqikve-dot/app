@@ -1,7 +1,8 @@
 import { render } from 'preact';
 import './ui/styles.css';
 import { App } from './ui/App';
-import { Game, type SaveData } from './game/Game';
+import { Game } from './game/Game';
+import { parseSaveData, type SaveData } from './game/saveData';
 import { decodeWorldCode, type WorldSpec } from './core/worldCode';
 import { randomSeed } from './core/rng';
 import { getLang, setLang, t } from './i18n';
@@ -23,7 +24,29 @@ function webglAvailable(): boolean {
   }
 }
 
+function worldFromLink(): WorldSpec | null {
+  try {
+    return decodeWorldCode(decodeURIComponent(location.hash.slice(1)));
+  } catch {
+    return null;
+  }
+}
+
+/** Which planet to show: 1. a world code in the link, 2. the live-update snapshot, 3. the last save, 4. a new one. */
+function chooseWorld(hotData: unknown): { spec: WorldSpec; save: SaveData | null } {
+  const fromLink = worldFromLink();
+  const save = parseSaveData(hotData) ?? Game.loadSave();
+  const saved = save ? decodeWorldCode(save.code) : null;
+  if (fromLink && (!saved || saved.seed !== fromLink.seed || saved.size !== fromLink.size)) return { spec: fromLink, save: null };
+  if (saved && save) return { spec: saved, save };
+  return { spec: { seed: randomSeed(), size: 'medium' }, save: null };
+}
+
+let started = false;
+
 function start(hotData: unknown): void {
+  if (started) return;
+  started = true;
   setLang(getLang());
   const root = document.getElementById('app')!;
 
@@ -44,26 +67,27 @@ function start(hotData: unknown): void {
   // Handle for automated browser tests.
   (window as unknown as { __enisGame?: Game }).__enisGame = game;
   render(<App game={game} />, uiRoot);
-  hot?.snapshot?.(() => game.snapshot());
-
-  // Which planet? 1. a world code in the link, 2. the live-update snapshot, 3. the last save, 4. a new one.
-  const fromHash = decodeWorldCode(decodeURIComponent(location.hash.slice(1)));
-  const restored = (hotData as SaveData | null) ?? Game.loadSave();
-  const restoredSpec = restored ? decodeWorldCode(restored.code) : null;
-  let spec: WorldSpec;
-  let minutes: number | undefined;
-  let events: SaveData['events'] = [];
-  if (fromHash && (!restoredSpec || restoredSpec.seed !== fromHash.seed || restoredSpec.size !== fromHash.size)) {
-    spec = fromHash;
-  } else if (restoredSpec && restored) {
-    spec = restoredSpec;
-    minutes = restored.minutes;
-    events = restored.events ?? [];
-  } else {
-    spec = { seed: randomSeed(), size: 'medium' };
+  try {
+    hot?.snapshot?.(() => game.snapshot());
+  } catch {
+    /* live updates are optional */
   }
-  void game.createWorld(spec, minutes, restored?.speedIndex === 0 ? 1 : restored?.speedIndex, events);
+
+  let choice: { spec: WorldSpec; save: SaveData | null };
+  try {
+    choice = chooseWorld(hotData);
+  } catch {
+    choice = { spec: { seed: randomSeed(), size: 'medium' }, save: null };
+  }
+  const { spec, save } = choice;
+  void game.start(spec, save);
 }
 
-if (hot?.ready) hot.ready(start);
-else start(hot?.data ?? null);
+try {
+  if (hot?.ready) hot.ready(start);
+  else start(hot?.data ?? null);
+} catch {
+  start(null);
+}
+// If the viewer never calls back, start anyway.
+setTimeout(() => start(null), 2500);

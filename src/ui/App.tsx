@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Game } from '../game/Game';
 import { safeStorage } from '../core/store';
+import { randomSeed } from '../core/rng';
 import { setLang, t, type Lang, type MessageKey } from '../i18n';
 import { powerDef, type PowerKind } from '../sim/powers';
 import { useStore } from './useStore';
@@ -160,6 +161,17 @@ export function App({ game }: { game: Game }) {
         </div>
       )}
 
+      {ui.error && !ui.loading && (
+        <div class="loading" role="alert">
+          <span class="loading-orb is-broken" aria-hidden="true" />
+          <p class="error-title">{t('app.error')}</p>
+          <p class="error-detail mono">{ui.error}</p>
+          <button type="button" class="btn btn-primary" onClick={() => void game.start({ seed: randomSeed(), size: 'small' }, null)}>
+            {t('app.retry')}
+          </button>
+        </div>
+      )}
+
       {ui.loading && (
         <div class={`loading${ui.ready ? ' is-over' : ''}`} role="status">
           <span class="loading-orb" aria-hidden="true" />
@@ -174,7 +186,7 @@ export function App({ game }: { game: Game }) {
           onLang={changeLang}
           onCreate={(spec) => {
             setMenuOpen(false);
-            void game.createWorld(spec);
+            void game.start(spec, null);
           }}
         />
       )}

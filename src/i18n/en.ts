@@ -4,6 +4,9 @@ export const en: Record<MessageKey, string> = {
   'app.loading': 'Your planet is forming …',
   'app.webglError': 'Your browser cannot show 3D graphics (WebGL). Please try a current Chrome, Edge, Firefox or Safari.',
 
+  'app.error': 'The planet could not be created.',
+  'app.retry': 'Create a new planet',
+
   'season.0': 'Spring',
   'season.1': 'Summer',
   'season.2': 'Autumn',

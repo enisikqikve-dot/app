@@ -2,6 +2,9 @@ export const de = {
   'app.loading': 'Planet entsteht …',
   'app.webglError': 'Dein Browser kann leider keine 3D-Grafik (WebGL) anzeigen. Probiere einen aktuellen Chrome, Edge, Firefox oder Safari.',
 
+  'app.error': 'Der Planet konnte nicht entstehen.',
+  'app.retry': 'Neuen Planeten erschaffen',
+
   'season.0': 'Frühling',
   'season.1': 'Sommer',
   'season.2': 'Herbst',
