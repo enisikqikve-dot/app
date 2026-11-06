@@ -216,9 +216,14 @@ export function App({ game }: { game: Game }) {
               lines={game.chronicleLines()}
               knowledge={game.knowledge()}
               species={game.speciesList()}
+              faith={game.faithInfo()}
               planet={ui.planetName}
               epoch={ui.epoch}
               onPerson={openPerson}
+              onPlace={(cell) => {
+                setChronicleOpen(false);
+                game.showCell(cell);
+              }}
               onClose={() => setChronicleOpen(false)}
             />
           )}

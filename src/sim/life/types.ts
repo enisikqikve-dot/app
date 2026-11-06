@@ -5,7 +5,7 @@
 
 export type Sex = 'f' | 'm';
 
-export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried' | 'eat' | 'hunt' | 'fish' | 'build' | 'heal' | 'teach' | 'tinker' | 'fire';
+export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried' | 'eat' | 'hunt' | 'fish' | 'build' | 'heal' | 'teach' | 'tinker' | 'fire' | 'pray';
 
 /** Why a person is walking somewhere. */
 export type Goal = 'water' | 'food' | 'group' | 'family' | 'wander' | 'safety' | 'hunt' | 'work' | 'none';
@@ -76,7 +76,11 @@ export type LogKey =
   | 'invented'
   | 'learned'
   | 'hunted'
-  | 'teacher';
+  | 'teacher'
+  | 'shaman'
+  | 'converted'
+  | 'prayed'
+  | 'answered';
 
 export interface LogEntry {
   t: number;
@@ -107,7 +111,10 @@ export type MoodKey =
   | 'fled'
   | 'invented'
   | 'song'
-  | 'hut';
+  | 'hut'
+  | 'faith'
+  | 'answered'
+  | 'rite';
 
 export interface Moodlet {
   key: MoodKey;
@@ -191,6 +198,12 @@ export interface Person {
   teacher?: number;
   /** The herd being hunted, or the person being healed or taught. */
   aim?: number;
+  /** How strongly this person believes in something higher (0 … 1). */
+  faith?: number;
+  /** The religion this person follows, or −1. */
+  belief?: number;
+  /** Leads the group's prayers and rites. */
+  shaman?: boolean;
 
   /** Cell the person is in (or leaving). */
   cell: number;
@@ -247,6 +260,9 @@ export interface ArchivedPerson {
   log: LogEntry[];
   /** What this person knew. */
   know: number;
+  /** The religion this person followed, and whether they led its rites. */
+  belief?: number;
+  shaman?: boolean;
 }
 
 /** A group of people who live and move together. */
@@ -256,12 +272,36 @@ export interface Band {
   founded: number;
   /** Shared food (meat, fish), in portions of a full meal. */
   food: number;
+  /** What the group has seen of you, per kind of deity (sky, healer, wrath, harvest, ancestors). */
+  seen?: number[];
+  /** Where the group saw its greatest miracle. */
+  holy?: number;
+  holyGain?: number;
+  /** An open prayer: what for, when and where. */
+  prayer?: { need: PrayerNeed; t: number; cell: number };
+  /** The group has had a shaman before. */
+  hadShaman?: boolean;
+}
+
+export type Deity = 'sky' | 'healer' | 'wrath' | 'harvest' | 'ancestors';
+export const DEITIES: Deity[] = ['sky', 'healer', 'wrath', 'harvest', 'ancestors'];
+export type PrayerNeed = 'rain' | 'food' | 'health';
+
+/** A religion: what people came to believe about you. */
+export interface Religion {
+  id: number;
+  deity: Deity;
+  founder: number;
+  founded: number;
+  /** The holy place (cell). */
+  holy: number;
+  ended?: number;
 }
 
 /** Something people built: a hut or a fireplace. */
 export interface Structure {
   id: number;
-  kind: 'hut' | 'fire';
+  kind: 'hut' | 'fire' | 'shrine';
   cell: number;
   spot: [number, number];
   band: number;
@@ -302,7 +342,11 @@ export type ChronicleKey =
   | 'invention'
   | 'lost'
   | 'species'
-  | 'speciesGone';
+  | 'speciesGone'
+  | 'shaman'
+  | 'religion'
+  | 'religionGone'
+  | 'answered';
 
 /** One line in the world chronicle. */
 export interface ChronicleEntry {
@@ -384,6 +428,10 @@ export interface LifeData {
   everKnown: number;
   /** Time skip: coarse steps until then. */
   coarseUntil?: number;
+  /** Everything people ever believed in. */
+  religions?: Religion[];
+  /** Your deeds as people see them: [kind, cruel]. */
+  deeds?: [number, number];
 }
 
 /** Hair colors; the first six are genes (lower = dominant), the last is grey hair of old age. */

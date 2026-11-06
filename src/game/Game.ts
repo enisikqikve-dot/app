@@ -32,7 +32,7 @@ import { Overlay, World, type ClimateShift } from '../sim/world';
 import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
 import { Life, REVIVE_WINDOW, TICK, type EventOutcome } from '../sim/life/life';
 import type { ChronicleKey, SpeciesId } from '../sim/life/types';
-import { PeopleInfo, type ChronicleLine, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
+import { PeopleInfo, type ChronicleLine, type FaithInfo, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
 import { BIT } from '../sim/life/inventions';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
 import { TerrainView } from '../render/terrain';
@@ -66,7 +66,7 @@ import { SoundEngine, type SoundName } from '../audio/sound';
 import { isLifeData, parseSaveData, sanitizeEvents, type LifeSnapshot, type SaveData } from './saveData';
 
 export type { SaveData };
-export type { Activity, ChronicleLine, FamilyTree, KnowledgeInfo, PersonInfo, SpeciesInfo } from './peopleInfo';
+export type { Activity, ChronicleLine, FaithInfo, FamilyTree, KnowledgeInfo, PersonInfo, SpeciesInfo } from './peopleInfo';
 
 /** A snapshot of the living world kept in memory as compact text. */
 interface MemSnapshot {
@@ -77,7 +77,7 @@ interface MemSnapshot {
 }
 
 /** Chronicle lines that also pop up as a message (if important). */
-const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone']);
+const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone', 'religion', 'religionGone', 'answered']);
 
 /** A running time skip. */
 interface SkipRun {
@@ -273,6 +273,9 @@ export class Game {
   private snapshots: MemSnapshot[] = [];
   private info: PeopleInfo | null = null;
   private seenChronicle = 0;
+  /** When the last prayer was shown as a message (game minutes). */
+  private lastPrayerNotice = -Infinity;
+  private seenPrayers = new Map<number, number>();
   private spec: WorldSpec | null = null;
   private focusCell = 0;
   private pickCell = 0;
@@ -489,6 +492,7 @@ export class Game {
     if (life.skipping) this.cutSkips(world, life.t);
     this.info = new PeopleInfo(life, planet);
     this.seenChronicle = life.chronicle.length;
+    this.lastPrayerNotice = -Infinity;
     this.clock.minutes = minutes;
 
     const root = new THREE.Group();
@@ -1161,6 +1165,7 @@ export class Game {
     this.cutSkips(world, point.minutes);
     this.info = new PeopleInfo(life, world.planet);
     this.seenChronicle = life.chronicle.length;
+    this.lastPrayerNotice = -Infinity;
     this.snapshots = this.snapshots.filter((s) => s.t <= point.minutes && s.eventCount <= point.eventCount);
     this.nextEventId = kept.reduce((m, e) => Math.max(m, e.id), 0) + 1;
     this.clock.minutes = Math.max(point.minutes, life.t);
@@ -1258,6 +1263,7 @@ export class Game {
       stopped: life.t < run.to,
     };
     this.seenChronicle = life.chronicle.length;
+    this.lastPrayerNotice = -Infinity;
     this.refreshEverything();
     this.ui.set({
       skip: null,
@@ -1308,6 +1314,30 @@ export class Game {
 
   speciesList(): SpeciesInfo[] {
     return this.info?.species() ?? [];
+  }
+
+  /** Turns the view to a place on the planet (a holy place, a praying group). */
+  showCell(cell: number): void {
+    if (!this.world) return;
+    const p = new THREE.Vector3().fromArray(this.world.world.planet.positions, cell * 3);
+    this.cameraCtl.lookAt(p, Math.min(this.cameraCtl.targetDistance, R * 0.35));
+  }
+
+  faithInfo(): FaithInfo {
+    return this.info?.faith() ?? { image: 'distant', good: 0, bad: 0, believers: 0, population: 0, religions: [], prayers: [] };
+  }
+
+  /** A group prays to you: tell the player now and then, so they can answer. */
+  private announcePrayers(life: Life): void {
+    for (const b of life.bands) {
+      const p = b.prayer;
+      if (!p || this.seenPrayers.get(b.id) === p.t) continue;
+      this.seenPrayers.set(b.id, p.t);
+      if (life.t - p.t > DAY || life.t - this.lastPrayerNotice < 6 * DAY) continue;
+      this.lastPrayerNotice = life.t;
+      const leader = life.person(b.leader);
+      this.notify(`notice.prayer.${p.need}` as MessageKey, { name: leader?.name ?? '?' });
+    }
   }
 
   /** New lines in the chronicle; important ones pop up as a message. */
@@ -1408,6 +1438,7 @@ export class Game {
         this.takeSnapshot(true);
       }
       this.announceChronicle(life);
+      this.announcePrayers(life);
     }
 
     const t = this.clock.minutes;

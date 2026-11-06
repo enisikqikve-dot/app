@@ -38,3 +38,8 @@ export function geneWords(genes: readonly number[]): string {
 export function inventionName(id: InventionId | string): string {
   return t(`invention.${id}` as MessageKey);
 }
+
+/** "Der Himmelsgeist", or in a sentence "den Himmelsgeist". */
+export function deityName(id: string, inSentence = false): string {
+  return t(`${inSentence ? 'deityAcc' : 'deity'}.${id}` as MessageKey);
+}

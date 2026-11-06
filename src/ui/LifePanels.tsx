@@ -4,7 +4,7 @@ import type { HerdInfo, PersonInfo } from '../game/Game';
 import type { PersonRef, RelationInfo } from '../game/peopleInfo';
 import { TRAITS } from '../sim/life/types';
 import { biomeName } from './format';
-import { geneWords, inventionName, speciesName } from './names';
+import { deityName, geneWords, inventionName, speciesName } from './names';
 import { INVENTION_IDS } from '../sim/life/inventions';
 import { SPECIES_IDS } from '../sim/life/species';
 import { IconBlessing, IconClose, IconFollow, IconTree, IconWhisper } from './icons';
@@ -88,6 +88,7 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
             {p.pregnant && <span class="chip chip-cond">{t('person.pregnant')}</span>}
             {p.lucky && <span class="chip chip-gold">{t('person.lucky')}</span>}
             {p.teacher && <span class="chip chip-cond">{t('person.teacherChip')}</span>}
+            {p.shaman && <span class="chip chip-gold">{t('person.shamanChip')}</span>}
             {p.feeling && <span class="chip chip-cond">{t(`person.feeling.${p.feeling}` as MessageKey)}</span>}
             {p.sick && <span class="chip chip-hot">{t('person.sick')}</span>}
           </div>
@@ -153,6 +154,15 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
           <div class="kin">
             <h3>{t('person.knowledge')}</h3>
             <p class="note">{p.know.length ? p.know.map((id) => inventionName(id)).join(' · ') : t('person.knowsNothing')}</p>
+          </div>
+          <div class="kin">
+            <h3>{t('person.faith')}</h3>
+            <p class="note">{p.belief ? t('person.believes', { deity: deityName(p.belief, true) }) : t('person.noBelief')}</p>
+            {p.alive && (p.belief || p.faith > 0.05) && (
+              <div class="needs">
+                <Bar label={t('person.faithStrength')} value={p.faith} />
+              </div>
+            )}
           </div>
           {p.task && (
             <p class="note">

@@ -193,6 +193,22 @@ function fireplaceGeometry(): THREE.BufferGeometry {
   return g;
 }
 
+/** Standing stones in a ring around a flat altar stone. */
+function shrineGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const h = 0.16 + 0.05 * Math.sin(i * 2.7);
+    parts.push(painted(new THREE.BoxGeometry(0.045, h, 0.03).translate(0, h / 2, 0).rotateY(-a).translate(Math.cos(a) * 0.17, 0, Math.sin(a) * 0.17), 0x9a948a));
+  }
+  parts.push(painted(new THREE.CylinderGeometry(0.06, 0.07, 0.035, 7).translate(0, 0.018, 0), 0x7d776d));
+  parts.push(painted(new THREE.OctahedronGeometry(0.02, 0).translate(0, 0.05, 0), 0xf2c46b));
+  const g = mergeGeometries(parts)!;
+  g.scale(1.7, 1.7, 1.7);
+  g.computeVertexNormals();
+  return g;
+}
+
 function glowTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -242,6 +258,7 @@ export class LifeView {
   private readonly dots: THREE.Points;
   private readonly huts: THREE.InstancedMesh;
   private readonly fireplaces: THREE.InstancedMesh;
+  private readonly shrines: THREE.InstancedMesh;
   private readonly flames: THREE.InstancedMesh;
   private readonly fireGlow: THREE.Points;
   private readonly glowPositions: Float32Array;
@@ -284,6 +301,7 @@ export class LifeView {
     }
     this.huts = new THREE.InstancedMesh(hutGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 }), MAX_STRUCTURES);
     this.fireplaces = new THREE.InstancedMesh(fireplaceGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }), MAX_FIRES);
+    this.shrines = new THREE.InstancedMesh(shrineGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }), MAX_FIRES);
     this.flames = new THREE.InstancedMesh(
       new THREE.ConeGeometry(0.05, 0.16, 6).translate(0, 0.1, 0),
       new THREE.MeshBasicMaterial({ color: 0xffa23a, transparent: true, opacity: 0.9, toneMapped: false }),
@@ -299,7 +317,7 @@ export class LifeView {
     );
     this.fireGlow.frustumCulled = false;
     this.group.add(this.fireGlow);
-    for (const mesh of [this.body, this.head, this.hair, this.graves, this.huts, this.fireplaces, this.flames]) {
+    for (const mesh of [this.body, this.head, this.hair, this.graves, this.huts, this.fireplaces, this.shrines, this.flames]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
       this.group.add(mesh);
@@ -462,6 +480,7 @@ export class LifeView {
   private updateStructures(life: Life, now: number, near: boolean, gameMinutes: number): void {
     let huts = 0;
     let fires = 0;
+    let shrines = 0;
     if (near) {
       for (const st of life.structures) {
         entityDir(this.planet, st.cell, -1, 0, st.spot, this.v);
@@ -474,6 +493,11 @@ export class LifeView {
           const age = Math.max(0, gameMinutes - st.used) / (4 * MINUTES_PER_YEAR);
           this.m.compose(this.w, this.q, this.s.set(1, grow * (1 - 0.5 * age), 1));
           this.huts.setMatrixAt(huts++, this.m);
+        } else if (st.kind === 'shrine') {
+          if (shrines >= MAX_FIRES) continue;
+          orient(this.v, hash(st.id) * Math.PI * 2, this.q);
+          this.m.compose(this.w, this.q, this.s.setScalar(0.4 + 0.6 * st.built));
+          this.shrines.setMatrixAt(shrines++, this.m);
         } else {
           if (fires >= MAX_FIRES) continue;
           orient(this.v, hash(st.id) * Math.PI * 2, this.q);
@@ -494,6 +518,8 @@ export class LifeView {
     this.huts.instanceMatrix.needsUpdate = true;
     this.fireplaces.count = fires;
     this.fireplaces.instanceMatrix.needsUpdate = true;
+    this.shrines.count = shrines;
+    this.shrines.instanceMatrix.needsUpdate = true;
     this.flames.count = fires;
     this.flames.instanceMatrix.needsUpdate = true;
     this.fireGlow.geometry.setDrawRange(0, fires);

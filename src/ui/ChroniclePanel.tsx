@@ -1,20 +1,23 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { formatNumber, t, type MessageKey } from '../i18n';
-import type { ChronicleCategory, ChronicleLine, KnowledgeInfo, SpeciesInfo } from '../game/peopleInfo';
+import type { ChronicleCategory, ChronicleLine, FaithInfo, KnowledgeInfo, SpeciesInfo } from '../game/peopleInfo';
 import { chronicleText } from './chronicleText';
-import { geneWords, inventionName, speciesName } from './names';
+import { deityName, geneWords, inventionName, speciesName } from './names';
+import { biomeName } from './format';
 import { IconClose } from './icons';
 
-const FILTERS: (ChronicleCategory | 'all')[] = ['all', 'people', 'love', 'death', 'groups', 'knowledge', 'animals', 'nature'];
-type Tab = 'chronicle' | 'knowledge' | 'animals';
+const FILTERS: (ChronicleCategory | 'all')[] = ['all', 'people', 'love', 'death', 'groups', 'knowledge', 'faith', 'animals', 'nature'];
+type Tab = 'chronicle' | 'knowledge' | 'faith' | 'animals';
 
 interface Props {
   lines: ChronicleLine[];
   knowledge: KnowledgeInfo[];
   species: SpeciesInfo[];
+  faith: FaithInfo;
   planet: string;
   epoch: 'none' | 'paleolithic' | 'mesolithic';
   onPerson: (id: number) => void;
+  onPlace: (cell: number) => void;
   onClose: () => void;
 }
 
@@ -87,6 +90,64 @@ function KnowledgeList({ items }: { items: KnowledgeInfo[] }) {
   );
 }
 
+function FaithList({ info, onPerson, onPlace }: { info: FaithInfo; onPerson: (id: number) => void; onPlace: (cell: number) => void }) {
+  return (
+    <>
+      <div class="faith-image">
+        <h3>{t('faith.imageTitle')}</h3>
+        <p>
+          <b>{t(`faith.image.${info.image}` as MessageKey)}</b> <span class="muted">{t(`faith.imageNote.${info.image}` as MessageKey, { good: formatNumber(info.good), bad: formatNumber(info.bad) })}</span>
+        </p>
+        <p class="know-meta mono">{t('faith.believers', { n: formatNumber(info.believers), m: formatNumber(info.population) })}</p>
+      </div>
+      {info.prayers.length > 0 && (
+        <div class="faith-prayers">
+          <h3>{t('faith.prayers')}</h3>
+          <ul>
+            {info.prayers.map((p) => (
+              <li key={p.band}>
+                <button type="button" class="chron-line" onClick={() => onPlace(p.cell)}>
+                  🙏 {t(`faith.prayer.${p.need}` as MessageKey, { name: p.leader })}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p class="note">{t('faith.note')}</p>
+      {info.religions.length === 0 ? (
+        <p class="place-text">{t('faith.none')}</p>
+      ) : (
+        <ol class="know-list">
+          {info.religions.map((r) => (
+            <li key={r.id} class={`know${r.endedYear !== null ? ' is-lost' : ''}`}>
+              <div class="know-head">
+                <b>{t('faith.religionName', { deity: deityName(r.deity, true) })}</b>
+                {r.endedYear !== null ? (
+                  <span class="chip chip-hot">{t('faith.ended', { year: formatNumber(r.endedYear) })}</span>
+                ) : (
+                  <span class="chip chip-gold">{t('faith.followers', { n: formatNumber(r.followers) })}</span>
+                )}
+              </div>
+              <span class="know-info">{t(`deityInfo.${r.deity}` as MessageKey)}</span>
+              <span class="know-meta mono">
+                <button type="button" class="link-btn" onClick={() => onPerson(r.founderId)}>
+                  {t('faith.founded', { name: r.founder ?? '?', year: formatNumber(r.foundedYear) })}
+                </button>
+                {' · '}
+                <button type="button" class="link-btn" onClick={() => onPlace(r.holyCell)}>
+                  {t('faith.holy', { biome: biomeName(r.holy) })}
+                </button>
+                {r.shamans > 0 ? ` · ${t('faith.shamans', { n: formatNumber(r.shamans) })}` : ''}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </>
+  );
+}
+
 function SpeciesList({ items }: { items: SpeciesInfo[] }) {
   return (
     <>
@@ -114,7 +175,7 @@ function SpeciesList({ items }: { items: SpeciesInfo[] }) {
 }
 
 /** The world chronicle (a history book that writes itself), the knowledge net and the animal species. */
-export function ChroniclePanel({ lines, knowledge, species, planet, epoch, onPerson, onClose }: Props) {
+export function ChroniclePanel({ lines, knowledge, species, faith, planet, epoch, onPerson, onPlace, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('chronicle');
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -131,7 +192,7 @@ export function ChroniclePanel({ lines, knowledge, species, planet, epoch, onPer
         </button>
       </div>
       <div class="tabs" role="tablist">
-        {(['chronicle', 'knowledge', 'animals'] as Tab[]).map((k) => (
+        {(['chronicle', 'knowledge', 'faith', 'animals'] as Tab[]).map((k) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} class={`tab${tab === k ? ' is-active' : ''}`} onClick={() => setTab(k)}>
             {t(`chron.tab.${k}` as MessageKey)}
           </button>
@@ -140,6 +201,7 @@ export function ChroniclePanel({ lines, knowledge, species, planet, epoch, onPer
       <div class="chron-body">
         {tab === 'chronicle' && <ChronicleList lines={lines} planet={planet} epoch={epoch} onPerson={onPerson} />}
         {tab === 'knowledge' && <KnowledgeList items={knowledge} />}
+        {tab === 'faith' && <FaithList info={faith} onPerson={onPerson} onPlace={onPlace} />}
         {tab === 'animals' && <SpeciesList items={species} />}
       </div>
     </section>

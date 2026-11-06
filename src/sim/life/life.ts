@@ -25,6 +25,7 @@ import { personName } from './names';
 import { SPECIES, SPECIES_IDS, habitatScore } from './species';
 import { childLook, childTraits, founderLook, hashUnit, randomTraits, type RandomSource } from './genetics';
 import { FLAG_FREEZING, moodReasons, moodValue, type MoodReason } from './mood';
+import { FaithSystem } from './faith';
 import {
   BIT,
   INVENTION_IDS,
@@ -84,7 +85,7 @@ const FLAG_STARVING = 1;
 const FLAG_PARCHED = 2;
 
 /** Actions that do something for the group when they end. */
-const WORK_ACTIONS = new Set<Person['action']>(['hunt', 'fish', 'build', 'heal', 'teach', 'fire']);
+const WORK_ACTIONS = new Set<Person['action']>(['hunt', 'fish', 'build', 'heal', 'teach', 'fire', 'pray']);
 
 /** Lines in the life story that are kept when someone is archived. */
 const MAJOR_LOG = new Set<LogKey>([
@@ -106,6 +107,8 @@ const MAJOR_LOG = new Set<LogKey>([
   'madePeace',
   'invented',
   'teacher',
+  'shaman',
+  'answered',
   'died',
 ]);
 
@@ -199,7 +202,8 @@ const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
 
 export class Life {
   private data: LifeData;
-  private readonly rng: StateRng;
+  /** The world's random generator (systems in other files draw from it too). */
+  readonly rng: StateRng;
   private readonly food = new Map<number, FoodEntry>();
   /** Everyone, living, recently dead and archived. */
   private readonly byId = new Map<number, Someone>();
@@ -207,6 +211,8 @@ export class Life {
   private bandsChecked = false;
   /** The idea a whisper gave (for the message). */
   private idea: InventionId | undefined;
+  /** Belief and religion (state lives in the data). */
+  readonly faith = new FaithSystem(this);
   /** How many talks one talk stands for (time skip). */
   private weight = 1;
   private readonly byCell = new Map<number, Person[]>();
@@ -370,6 +376,16 @@ export class Life {
     return this.data.t;
   }
 
+  /** @internal */
+  nearLand(world: World, cell: number): number {
+    return Life.nearestLand(world, cell);
+  }
+
+  /** The raw data, for the systems in other files (faith, tribes …). @internal */
+  get raw(): LifeData {
+    return this.data;
+  }
+
   get people(): readonly Person[] {
     return this.data.people;
   }
@@ -450,6 +466,7 @@ export class Life {
       childrenAlive: children,
       song: (this.bandKnows(p.band) & BIT.song) !== 0,
       hut: this.hutAt(p.cell, p.band),
+      believer: (p.belief ?? -1) >= 0 && (p.faith ?? 0) >= 0.45,
     });
     return { value: moodValue(reasons), reasons };
   }
@@ -670,7 +687,8 @@ export class Life {
     return band;
   }
 
-  private log(p: Person, key: LogKey, extra?: { cause?: DeathCause; other?: number; n?: number }): void {
+  /** @internal */
+  log(p: Person, key: LogKey, extra?: { cause?: DeathCause; other?: number; n?: number }): void {
     const entry: LogEntry = { t: this.data.t, key };
     if (extra?.cause) entry.cause = extra.cause;
     if (extra?.other !== undefined && extra.other >= 0) entry.other = extra.other;
@@ -684,11 +702,13 @@ export class Life {
     }
   }
 
-  private chron(key: ChronicleKey, fields: Omit<ChronicleEntry, 't' | 'key'> = {}): void {
+  /** @internal */
+  chron(key: ChronicleKey, fields: Omit<ChronicleEntry, 't' | 'key'> = {}): void {
     this.data.chronicle.push({ t: this.data.t, key, ...fields });
   }
 
-  private addMood(p: Person, key: MoodKey, v: number, days: number, other?: number): void {
+  /** @internal */
+  addMood(p: Person, key: MoodKey, v: number, days: number, other?: number): void {
     const m = { key, v, until: this.data.t + days * DAY } as Person['moods'][number];
     if (other !== undefined) m.other = other;
     p.moods.push(m);
@@ -698,7 +718,8 @@ export class Life {
     }
   }
 
-  private die(p: Person, cause: DeathCause): void {
+  /** @internal */
+  die(p: Person, cause: DeathCause): void {
     if (!p.alive) return;
     const age = this.ageOf(p);
     const wasLeader = this.isLeader(p);
@@ -753,14 +774,16 @@ export class Life {
     }
   }
 
-  private makeSick(p: Person): void {
+  /** @internal */
+  makeSick(p: Person): void {
     if (p.sick > 0 || p.immune || !p.alive) return;
     if (p.luck !== undefined && p.luck > this.data.t) return;
     p.sick = this.rng.range(4, 9) * DAY;
     this.log(p, 'sick');
   }
 
-  private hurt(p: Person, amount: number, cause: DeathCause): void {
+  /** @internal */
+  hurt(p: Person, amount: number, cause: DeathCause): void {
     p.health -= amount;
     p.hurtBy = cause;
   }
@@ -952,7 +975,8 @@ export class Life {
     }
   }
 
-  private isDay(world: World, cell: number, t: number): boolean {
+  /** @internal */
+  isDay(world: World, cell: number, t: number): boolean {
     const h = this.localHours(world, cell, t);
     return h >= 6 && h < 20.5;
   }
@@ -1013,6 +1037,8 @@ export class Life {
     if (guide && guide !== p && guide.cell !== p.cell && world.kmBetween(guide.cell, p.cell) > world.kmPerCell * reach) {
       if (this.goTo(p, world, (c) => c === guide.cell, 25, age < 13 ? 'family' : 'group')) return;
     }
+    // Believers in distress pray.
+    if (age >= 10 && this.faith.wantsToPray(p, world)) return this.start(p, 'pray', t, 60);
     // Work for the group by day (not when thirsty or hungry: work takes people away from water).
     if (age >= 13 && p.task && p.task !== 'gather' && p.thirst < 0.35 && p.hunger < 0.45 && this.isDay(world, p.cell, t) && this.doTask(p, world, t, leader)) return;
     // Leaders sometimes move on to a better place (always, when food runs short). With huts, they stay.
@@ -1036,14 +1062,16 @@ export class Life {
     this.start(p, 'rest', t, 60);
   }
 
-  private start(p: Person, action: Person['action'], t: number, minutes: number, newSpot = false): void {
+  /** @internal */
+  start(p: Person, action: Person['action'], t: number, minutes: number, newSpot = false): void {
     p.action = action;
     p.actionUntil = t + Math.max(1, Math.round(minutes / TICK)) * TICK;
     if (newSpot) p.spot = [this.rng.range(-14, 14), this.rng.range(-14, 14)];
   }
 
   /** The group's leader, or null if this person leads (or the leader is gone). */
-  private leaderOf(p: Person): Person | null {
+  /** @internal */
+  leaderOf(p: Person): Person | null {
     const band = this.bandById.get(p.band);
     if (!band || band.leader === p.id || band.leader < 0) return null;
     const l = this.person(band.leader);
@@ -1100,7 +1128,8 @@ export class Life {
   }
 
   /** Fresh water: a river, lake or spring here or next door, or small streams in damp land. */
-  private waterScore(world: World, c: number): number {
+  /** @internal */
+  waterScore(world: World, c: number): number {
     const planet = world.planet;
     if (planet.fresh[c] !== FRESH_NONE) return 0.6;
     for (let k = planet.neighborOffsets[c]; k < planet.neighborOffsets[c + 1]; k++) {
@@ -1111,7 +1140,8 @@ export class Life {
   }
 
   /** Breadth-first search over land to the nearest cell that matches. */
-  private goTo(p: Person, world: World, match: (c: number) => boolean, maxSteps: number, goal: Person['goal']): boolean {
+  /** @internal */
+  goTo(p: Person, world: World, match: (c: number) => boolean, maxSteps: number, goal: Person['goal']): boolean {
     const planet = world.planet;
     const prev = new Map<number, number>([[p.cell, -1]]);
     let frontier = [p.cell];
@@ -1229,6 +1259,7 @@ export class Life {
       this.tryInvent(p, world, t, age);
       p.task = this.chooseTask(p, world, age);
     }
+    this.faith.personDaily(p, age);
 
     if (p.sex === 'f' && !p.pregnant && p.partner >= 0) this.tryConceive(p, world, t, age);
     if (p.partner < 0 && age >= 17 && age <= 35 && !this.isLeader(p) && this.rng.chance(0.012)) this.seekPartner(p, world);
@@ -1598,6 +1629,7 @@ export class Life {
     p.chat = { kind, with: q.id, until };
     q.chat = { kind, with: p.id, until };
     if (kind !== 'quarrel') {
+      this.faith.onTalk(p, q, w);
       // Talking passes knowledge on.
       if (countKnown(p.know) >= countKnown(q.know)) this.tryTeach(p, q, 0.04 * w);
       else this.tryTeach(q, p, 0.04 * w);
@@ -1751,6 +1783,7 @@ export class Life {
     }
     this.dailyCamps(t, members);
     this.dailySpecies(world, t);
+    this.faith.bandsDaily(world, t);
   }
 
   // ------------------------------------------------------------ knowledge
@@ -1772,14 +1805,16 @@ export class Life {
     return m;
   }
 
-  private invalidateKnowledge(): void {
+  /** @internal */
+  invalidateKnowledge(): void {
     this.bandKnowCache = null;
     this.memberCache = null;
     this.bandStats = null;
   }
 
   /** The living members of a group (rebuilt each step). */
-  private members(bandId: number): Person[] {
+  /** @internal */
+  members(bandId: number): Person[] {
     if (!this.memberCache) {
       const map = new Map<number, Person[]>();
       for (const p of this.data.people) {
@@ -1793,7 +1828,8 @@ export class Life {
     return this.memberCache.get(bandId) ?? [];
   }
 
-  private stats(bandId: number): { sick: boolean; hunger: number; size: number } {
+  /** @internal */
+  stats(bandId: number): { sick: boolean; hunger: number; size: number } {
     if (!this.bandStats) {
       const map = new Map<number, { sick: boolean; hunger: number; size: number }>();
       for (const p of this.data.people) {
@@ -1819,7 +1855,8 @@ export class Life {
     }
   }
 
-  private learn(p: Person, id: InventionId): void {
+  /** @internal */
+  learn(p: Person, id: InventionId): void {
     p.know |= BIT[id];
     this.invalidateKnowledge();
   }
@@ -1928,6 +1965,7 @@ export class Life {
     const teacher = p.teacher !== undefined && p.teacher > this.data.t;
     if (know && (teacher || this.someoneToTeach(p))) scores.push(['teach', (teacher ? 4 : 0.7) * (0.4 + tr[T_KIND] / 100 + tr[T_CLEVER] / 200)]);
     if (tr[T_CURIOUS] > 55) scores.push(['tinker', (tr[T_CURIOUS] / 100) * 0.8]);
+    if (p.shaman) scores.push(['rite', 1.3]);
     if (group & BIT.fire && !this.members(p.band).some((q) => q !== p && q.alive && q.band === p.band && q.task === 'fire')) {
       scores.push(['fire', age > 55 ? 1.5 : 0.7]);
     }
@@ -2020,6 +2058,14 @@ export class Life {
       case 'tinker':
         this.start(p, 'tinker', t, 180, true);
         return true;
+      case 'rite': {
+        // At the holy place if it is near, otherwise at the camp.
+        const rel = p.belief !== undefined && p.belief >= 0 ? this.faith.religion(p.belief) : undefined;
+        const place = rel && world.within(rel.holy, p.cell, world.kmPerCell * 4) ? rel.holy : camp;
+        if (p.cell !== place) return this.goTo(p, world, (c) => c === place, 6, 'work');
+        this.start(p, 'pray', t, 120);
+        return true;
+      }
       default:
         return false;
     }
@@ -2074,6 +2120,10 @@ export class Life {
         if (pupil?.alive && pupil.cell === p.cell) this.tryTeach(p, pupil, 0.35);
         return;
       }
+      case 'pray':
+        if (p.shaman) this.faith.rite(p);
+        else this.log(p, 'prayed');
+        return;
       case 'fire': {
         const fire = this.data.structures.find((s) => s.kind === 'fire' && s.band === p.band && s.cell === p.cell);
         if (fire) fire.used = t;
@@ -2102,7 +2152,8 @@ export class Life {
 
   // ------------------------------------------------------------ camps
 
-  private addStructure(kind: Structure['kind'], cell: number, band: number, built: number): Structure {
+  /** @internal */
+  addStructure(kind: Structure['kind'], cell: number, band: number, built: number): Structure {
     const st: Structure = {
       id: this.data.nextId++,
       kind,
@@ -2117,7 +2168,8 @@ export class Life {
   }
 
   /** A finished hut of this group in this place. */
-  private hutAt(cell: number, band: number): boolean {
+  /** @internal */
+  hutAt(cell: number, band: number): boolean {
     for (const s of this.data.structures) if (s.kind === 'hut' && s.cell === cell && s.band === band && s.built >= 1) return true;
     return false;
   }
@@ -2144,7 +2196,7 @@ export class Life {
       // Huts nearby that another group left are taken over.
       for (const s of this.data.structures) if (s.cell === camp && s.band !== band.id && !members.has(s.band)) s.band = band.id;
     }
-    const keep = this.data.structures.filter((s) => t - s.used < (s.kind === 'fire' ? 1 : 4) * YEAR);
+    const keep = this.data.structures.filter((s) => s.kind === 'shrine' || t - s.used < (s.kind === 'fire' ? 1 : 4) * YEAR);
     if (keep.length > MAX_STRUCTURES) keep.splice(0, keep.length - MAX_STRUCTURES);
     this.data.structures = keep;
   }
@@ -2167,6 +2219,8 @@ export class Life {
       spot: [p.spot[0], p.spot[1]],
       log: p.log.filter((l) => MAJOR_LOG.has(l.key)).slice(-12),
       know: p.know,
+      ...((p.belief ?? -1) >= 0 ? { belief: p.belief } : {}),
+      ...(p.shaman ? { shaman: true } : {}),
     };
   }
 
@@ -2851,6 +2905,7 @@ export class Life {
       default:
         break;
     }
+    this.faith.witness(e, world);
     return outcome;
   }
 

@@ -19,7 +19,7 @@ import type {
   Person,
   Sex,
 } from '../sim/life/types';
-import { HAIR_GREY, type SpeciesId } from '../sim/life/types';
+import { HAIR_GREY, type Deity, type PrayerNeed, type SpeciesId } from '../sim/life/types';
 import { INVENTION_IDS, INVENTIONS, BIT, listOf, type InventionId, type Task } from '../sim/life/inventions';
 
 type Someone = Person | ArchivedPerson;
@@ -49,7 +49,8 @@ export type Activity =
   | 'heal'
   | 'teach'
   | 'tinker'
-  | 'fire';
+  | 'fire'
+  | 'pray';
 
 export interface PersonRef {
   id: number;
@@ -106,6 +107,10 @@ export interface PersonInfo {
   know: InventionId[];
   task: Task | null;
   teacher: boolean;
+  /** How strongly they believe (0–1), in what, and whether they lead the rites. */
+  faith: number;
+  belief: Deity | null;
+  shaman: boolean;
   partner: PersonRef | null;
   formerPartners: PersonRef[];
   parents: PersonRef[];
@@ -134,7 +139,7 @@ export interface FamilyTree {
   grandchildren: number;
 }
 
-export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'knowledge' | 'animals' | 'nature';
+export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'knowledge' | 'animals' | 'faith' | 'nature';
 
 export interface ChronicleLine {
   index: number;
@@ -163,6 +168,38 @@ export interface KnowledgeInfo {
   status: 'known' | 'lost' | 'possible' | 'unknown';
   /** Who first had the idea, and when. */
   first?: { name: string; year: number };
+}
+
+/** A religion: what people came to believe about you. */
+export interface ReligionInfo {
+  id: number;
+  deity: Deity;
+  founder: string | null;
+  founderId: number;
+  foundedYear: number;
+  endedYear: number | null;
+  followers: number;
+  shamans: number;
+  holy: Biome;
+  holyCell: number;
+}
+
+/** An open prayer: a group asks you for help. */
+export interface PrayerInfo {
+  band: number;
+  leader: string;
+  need: PrayerNeed;
+  cell: number;
+}
+
+export interface FaithInfo {
+  image: 'kind' | 'wrathful' | 'fickle' | 'distant';
+  good: number;
+  bad: number;
+  believers: number;
+  population: number;
+  religions: ReligionInfo[];
+  prayers: PrayerInfo[];
 }
 
 export interface SpeciesInfo {
@@ -196,6 +233,10 @@ const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
   lost: 'knowledge',
   species: 'animals',
   speciesGone: 'animals',
+  shaman: 'faith',
+  religion: 'faith',
+  religionGone: 'faith',
+  answered: 'faith',
 };
 
 export class PeopleInfo {
@@ -296,6 +337,9 @@ export class PeopleInfo {
       know: listOf(x.know ?? 0),
       task: living?.alive && this.life.ageOf(x) >= 14 ? (living.task ?? 'gather') : null,
       teacher: !!living?.teacher && living.teacher > t,
+      faith: living ? (living.faith ?? 0) : 0,
+      belief: this.deityOf(x.belief),
+      shaman: !!x.shaman,
       partner: partnerId >= 0 ? this.ref(life.anyone(partnerId)) : null,
       formerPartners: x.partners.filter((id) => id !== partnerId).map((id) => this.ref(life.anyone(id))).filter((r): r is PersonRef => !!r),
       parents,
@@ -370,6 +414,10 @@ export class PeopleInfo {
     if (e.s !== undefined) line.s = e.s;
     if (e.a !== undefined && e.key !== 'power' && e.key !== 'sign' && e.key !== 'species') line.person = e.a;
     else if (e.key === 'power' && e.s === 'revive') line.person = e.a;
+    if ((e.key === 'religion' || e.key === 'religionGone') && e.n !== undefined) {
+      const rel = this.life.faith.religion(e.n);
+      if (rel) line.s = rel.deity;
+    }
     if ((e.key === 'species' || e.key === 'speciesGone') && e.n !== undefined) {
       const rec = this.life.speciesRecord(e.n);
       if (rec) line.species = { base: rec.base, prefix: rec.prefix };
@@ -402,6 +450,55 @@ export class PeopleInfo {
       if (first) info.first = first;
       return info;
     });
+  }
+
+  private deityOf(id: number | undefined): Deity | null {
+    if (id === undefined || id < 0) return null;
+    return this.life.faith.religion(id)?.deity ?? null;
+  }
+
+  /** Religions, open prayers and how people see you. */
+  faith(): FaithInfo {
+    const life = this.life;
+    const faith = life.faith;
+    const counts = new Map<number, { n: number; shamans: number }>();
+    let believers = 0;
+    let population = 0;
+    for (const p of life.people) {
+      if (!p.alive) continue;
+      population++;
+      if ((p.belief ?? -1) < 0) continue;
+      believers++;
+      const c = counts.get(p.belief!) ?? { n: 0, shamans: 0 };
+      c.n++;
+      if (p.shaman) c.shamans++;
+      counts.set(p.belief!, c);
+    }
+    const religions = faith.religions
+      .map((r) => {
+        const c = counts.get(r.id) ?? { n: 0, shamans: 0 };
+        return {
+          id: r.id,
+          deity: r.deity,
+          founder: this.name(r.founder) ?? null,
+          founderId: r.founder,
+          foundedYear: dateFromMinutes(r.founded).year,
+          endedYear: r.ended !== undefined ? dateFromMinutes(r.ended).year : null,
+          followers: c.n,
+          shamans: c.shamans,
+          holy: this.planet.biome[r.holy] as Biome,
+          holyCell: r.holy,
+        };
+      })
+      .sort((a, b) => (a.endedYear === null ? 0 : 1) - (b.endedYear === null ? 0 : 1) || b.followers - a.followers);
+    const prayers: PrayerInfo[] = [];
+    for (const b of life.bands) {
+      if (!b.prayer || life.t - b.prayer.t > 4 * 1440) continue;
+      const leader = life.person(b.leader);
+      prayers.push({ band: b.id, leader: leader?.name ?? '?', need: b.prayer.need, cell: b.prayer.cell });
+    }
+    const [good, bad] = life.raw.deeds ?? [0, 0];
+    return { image: faith.godImage(), good, bad, believers, population, religions, prayers };
   }
 
   /** All animal species, living ones first. */

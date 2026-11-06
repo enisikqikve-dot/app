@@ -8,7 +8,24 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 5 – Wissen & lange Zeiten ✅
+## Stand: Meilenstein 6 – Glaube ✅
+
+**Neu: Die Menschen entdecken dich. Was sie von dir sehen, prägt, woran sie glauben.**
+
+- **Glaube wächst aus deinen Taten:** Wer ein Wunder oder eine Katastrophe sieht, beginnt zu glauben, fromme Menschen stärker.
+  - Ohne dein Zutun entsteht nach Generationen ein stiller Ahnenkult. Zeigst du dich, geht es viel schneller.
+  - Ohne neue Wunder sinkt der Glaube langsam auf ein ruhiges Maß zurück.
+- **Stimme der Geister (Schamane):** Ist die Gruppe gläubig genug, wird der frömmste Erwachsene zur Stimme der Geister und leitet Rituale am heiligen Ort. Das hebt Stimmung und Glauben.
+- **Religionen:** Eine Gruppe gründet einen Glauben und errichtet am Ort ihres größten Wunders einen Steinkreis.
+  - Woran sie glauben, hängt davon ab, was sie gesehen haben: den Himmelsgeist (Zeichen, neue Menschen), die Heilende Mutter (Heilung, Wiederbelebung), den Zornigen Gott (Katastrophen), den Erntegeist (Regen, Ernte) oder die Ahnen.
+  - Der Glaube wird beim Reden und von den Eltern weitergegeben. Glaubt niemand mehr daran, ist er vergessen.
+- **Gebete:** In Not (Dürre, Hunger, Krankheit) beten Gläubige zu dir, und eine Nachricht sagt es dir.
+  - Hilfst du rechtzeitig mit der passenden Kraft, ist das Gebet erhört. Ihr Glaube wird stärker, und die Chronik schreibt es auf.
+- **Dein Bild bei den Menschen:** gütig, zornig, launisch oder fern, je nachdem, ob du mehr hilfst oder strafst.
+- **Neuer Reiter „Glaube“ in der Chronik:** Religionen mit Gläubigen, Gründer und heiligem Ort (antippen zum Hinfliegen), offene Gebete und dein Bild.
+- **Akte:** Woran jemand glaubt und wie stark; ein Zeichen „Stimme der Geister“.
+
+### Meilenstein 5 – Wissen & lange Zeiten ✅
 
 **Neu: Die Menschen erfinden von selbst, arbeiten für ihre Gruppe, bauen Lager, und die Tiere entwickeln sich weiter.**
 

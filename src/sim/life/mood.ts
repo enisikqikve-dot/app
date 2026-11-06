@@ -23,6 +23,8 @@ export interface MoodContext {
   song?: boolean;
   /** Sleeps in a hut. */
   hut?: boolean;
+  /** Believes firmly. */
+  believer?: boolean;
 }
 
 export function moodReasons(p: Person, t: number, ctx: MoodContext): MoodReason[] {
@@ -38,6 +40,7 @@ export function moodReasons(p: Person, t: number, ctx: MoodContext): MoodReason[
   if (ctx.childrenAlive > 0) out.push({ key: 'children', v: Math.min(15, 5 * ctx.childrenAlive) });
   if (ctx.song) out.push({ key: 'song', v: 5 });
   if (ctx.hut) out.push({ key: 'hut', v: 5 });
+  if (ctx.believer) out.push({ key: 'faith', v: 5 });
   // Remembered reasons; several of the same kind count with less weight.
   const seen = new Map<MoodKey, number>();
   const sorted = p.moods.filter((m) => m.until > t).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
