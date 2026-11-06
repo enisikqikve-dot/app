@@ -217,6 +217,7 @@ export function App({ game }: { game: Game }) {
               knowledge={game.knowledge()}
               species={game.speciesList()}
               faith={game.faithInfo()}
+              peoples={game.peoples()}
               planet={ui.planetName}
               epoch={ui.epoch}
               onPerson={openPerson}

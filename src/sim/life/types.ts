@@ -26,7 +26,9 @@ export type DeathCause =
   | 'age'
   | 'childbirth'
   | 'fight'
-  | 'hunt';
+  | 'hunt'
+  | 'war'
+  | 'murder';
 
 /** Character traits, each 0 … 100 (stored in this order in `Person.traits`). */
 export const TRAITS = ['curious', 'diligent', 'brave', 'kind', 'aggressive', 'clever', 'pious', 'ambitious'] as const;
@@ -80,7 +82,15 @@ export type LogKey =
   | 'shaman'
   | 'converted'
   | 'prayed'
-  | 'answered';
+  | 'answered'
+  | 'stole'
+  | 'caught'
+  | 'murdered'
+  | 'banished'
+  | 'traded'
+  | 'chief'
+  | 'battle'
+  | 'newPeople';
 
 export interface LogEntry {
   t: number;
@@ -114,7 +124,12 @@ export type MoodKey =
   | 'hut'
   | 'faith'
   | 'answered'
-  | 'rite';
+  | 'rite'
+  | 'trade'
+  | 'war'
+  | 'victory'
+  | 'defeat'
+  | 'robbed';
 
 export interface Moodlet {
   key: MoodKey;
@@ -204,6 +219,8 @@ export interface Person {
   belief?: number;
   /** Leads the group's prayers and rites. */
   shaman?: boolean;
+  /** Crimes others found out about (theft 1, murder 3). */
+  crimes?: number;
 
   /** Cell the person is in (or leaving). */
   cell: number;
@@ -281,6 +298,47 @@ export interface Band {
   prayer?: { need: PrayerNeed; t: number; cell: number };
   /** The group has had a shaman before. */
   hadShaman?: boolean;
+  /** The people (Volk) the group belongs to. */
+  tribe?: number;
+}
+
+/** A people: groups that share an origin, a name and a culture. */
+export interface Tribe {
+  id: number;
+  name: string;
+  founded: number;
+  /** Colour of its clothes and banners (0 … 1). */
+  hue: number;
+  /** How it came to be, and the people it split from. */
+  origin: 'first' | 'split' | 'far' | 'appeared';
+  parent?: number;
+  /** The leader of its largest group. */
+  chief: number;
+  /** Culture 0 … 100: warlike, pious, open. */
+  culture: [number, number, number];
+  /** Relations to other peoples it has met (−100 … 100): [tribe, value]. */
+  rel: [number, number][];
+  /** Peoples it has traded with. */
+  traded?: number[];
+  /** A murder or defeat it wants to avenge: [tribe, until]. */
+  grudge?: [number, number];
+  ended?: number;
+}
+
+export type WarReason = 'land' | 'revenge' | 'faith' | 'hunger' | 'ambition';
+
+export interface War {
+  id: number;
+  /** The people that started it, and the other one. */
+  a: number;
+  b: number;
+  reason: WarReason;
+  start: number;
+  end?: number;
+  /** The fallen on each side. */
+  dead: [number, number];
+  battles: number;
+  winner?: number;
 }
 
 export type Deity = 'sky' | 'healer' | 'wrath' | 'harvest' | 'ancestors';
@@ -346,7 +404,19 @@ export type ChronicleKey =
   | 'shaman'
   | 'religion'
   | 'religionGone'
-  | 'answered';
+  | 'answered'
+  | 'tribe'
+  | 'tribeGone'
+  | 'contact'
+  | 'trade'
+  | 'chief'
+  | 'theft'
+  | 'murder'
+  | 'banished'
+  | 'war'
+  | 'battle'
+  | 'peace'
+  | 'conquered';
 
 /** One line in the world chronicle. */
 export interface ChronicleEntry {
@@ -359,6 +429,9 @@ export interface ChronicleEntry {
   n?: number;
   /** A power kind or a cause of death. */
   s?: string;
+  /** Peoples the line is about. */
+  x?: number;
+  y?: number;
   /** Important lines are highlighted. */
   major?: 1;
 }
@@ -430,6 +503,9 @@ export interface LifeData {
   coarseUntil?: number;
   /** Everything people ever believed in. */
   religions?: Religion[];
+  /** All peoples that ever lived, and their wars. */
+  tribes?: Tribe[];
+  wars?: War[];
   /** Your deeds as people see them: [kind, cruel]. */
   deeds?: [number, number];
 }

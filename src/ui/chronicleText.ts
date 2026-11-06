@@ -54,6 +54,32 @@ export function chronicleText(l: ChronicleLine, planet: string): string {
       return t('chron.religionGone', { deity: deityName(l.s ?? 'ancestors', true) });
     case 'answered':
       return t(`chron.answered.${l.s ?? 'food'}` as MessageKey, { a });
+    case 'tribe':
+      return t(`chron.tribe.${l.s ?? 'appeared'}` as MessageKey, { a, tribe: l.tribe ?? '?', parent: l.other ?? '?' });
+    case 'tribeGone':
+      return t('chron.tribeGone', { tribe: l.tribe ?? '?' });
+    case 'contact':
+      return t('chron.contact', { tribe: l.tribe ?? '?', other: l.other ?? '?' });
+    case 'trade':
+      return t('chron.trade', { tribe: l.tribe ?? '?', other: l.other ?? '?' });
+    case 'chief':
+      return t('chron.chief', { a, tribe: l.tribe ?? '?' });
+    case 'theft':
+      return t('chron.theft', { a });
+    case 'murder':
+      return t('chron.murder', { a, b });
+    case 'banished':
+      return t('chron.banished', { a, b });
+    case 'war':
+      return t('chron.war', { tribe: l.tribe ?? '?', other: l.other ?? '?', reason: t(`chron.warReason.${l.s ?? 'land'}` as MessageKey) });
+    case 'battle':
+      return t('chron.battle', { tribe: l.tribe ?? '?', other: l.other ?? '?', n });
+    case 'peace': {
+      const base = l.a ? t('chron.peaceBy', { a, tribe: l.tribe ?? '?', other: l.other ?? '?', n }) : t('chron.peace', { tribe: l.tribe ?? '?', other: l.other ?? '?', n });
+      return l.winner ? `${base} ${t('chron.peaceWinner', { winner: l.winner })}` : base;
+    }
+    case 'conquered':
+      return t('chron.conquered', { a, tribe: l.tribe ?? '?' });
     case 'speciesGone':
       return t('chron.speciesGone', { species: l.species ? speciesName(l.species.base, l.species.prefix) : '?' });
     default:

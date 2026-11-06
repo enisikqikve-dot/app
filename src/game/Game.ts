@@ -32,7 +32,7 @@ import { Overlay, World, type ClimateShift } from '../sim/world';
 import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
 import { Life, REVIVE_WINDOW, TICK, type EventOutcome } from '../sim/life/life';
 import type { ChronicleKey, SpeciesId } from '../sim/life/types';
-import { PeopleInfo, type ChronicleLine, type FaithInfo, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
+import { PeopleInfo, type ChronicleLine, type FaithInfo, type PeoplesInfo, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
 import { BIT } from '../sim/life/inventions';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
 import { TerrainView } from '../render/terrain';
@@ -66,7 +66,7 @@ import { SoundEngine, type SoundName } from '../audio/sound';
 import { isLifeData, parseSaveData, sanitizeEvents, type LifeSnapshot, type SaveData } from './saveData';
 
 export type { SaveData };
-export type { Activity, ChronicleLine, FaithInfo, FamilyTree, KnowledgeInfo, PersonInfo, SpeciesInfo } from './peopleInfo';
+export type { Activity, ChronicleLine, FaithInfo, PeoplesInfo, FamilyTree, KnowledgeInfo, PersonInfo, SpeciesInfo } from './peopleInfo';
 
 /** A snapshot of the living world kept in memory as compact text. */
 interface MemSnapshot {
@@ -77,7 +77,7 @@ interface MemSnapshot {
 }
 
 /** Chronicle lines that also pop up as a message (if important). */
-const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone', 'religion', 'religionGone', 'answered']);
+const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone', 'religion', 'religionGone', 'answered', 'tribe', 'tribeGone', 'contact', 'murder', 'war', 'battle', 'peace', 'conquered']);
 
 /** A running time skip. */
 interface SkipRun {
@@ -1321,6 +1321,10 @@ export class Game {
     if (!this.world) return;
     const p = new THREE.Vector3().fromArray(this.world.world.planet.positions, cell * 3);
     this.cameraCtl.lookAt(p, Math.min(this.cameraCtl.targetDistance, R * 0.35));
+  }
+
+  peoples(): PeoplesInfo {
+    return this.info?.peoples() ?? { tribes: [], wars: [] };
   }
 
   faithInfo(): FaithInfo {

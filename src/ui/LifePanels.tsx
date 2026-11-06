@@ -8,6 +8,7 @@ import { deityName, geneWords, inventionName, speciesName } from './names';
 import { INVENTION_IDS } from '../sim/life/inventions';
 import { SPECIES_IDS } from '../sim/life/species';
 import { IconBlessing, IconClose, IconFollow, IconTree, IconWhisper } from './icons';
+import { TribeDot } from './ChroniclePanel';
 
 function Bar({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
   const pct = Math.round(Math.max(0, Math.min(1, value)) * 100);
@@ -89,6 +90,7 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
             {p.lucky && <span class="chip chip-gold">{t('person.lucky')}</span>}
             {p.teacher && <span class="chip chip-cond">{t('person.teacherChip')}</span>}
             {p.shaman && <span class="chip chip-gold">{t('person.shamanChip')}</span>}
+            {p.crimes >= 3 ? <span class="chip chip-hot">{t('person.murderer')}</span> : p.crimes > 0 ? <span class="chip chip-hot">{t('person.thief')}</span> : null}
             {p.feeling && <span class="chip chip-cond">{t(`person.feeling.${p.feeling}` as MessageKey)}</span>}
             {p.sick && <span class="chip chip-hot">{t('person.sick')}</span>}
           </div>
@@ -172,6 +174,11 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
           <p class="note">{looks}</p>
           {p.band && (
             <p class="note">{p.leader ? t('person.ownBand', { n: formatNumber(p.band.size) }) : t('person.band', { leader: p.band.leader, n: formatNumber(p.band.size) })}</p>
+          )}
+          {p.tribe && (
+            <p class="note">
+              <TribeDot hue={p.tribe.hue} /> {t('peoples.name', { name: p.tribe.name })}
+            </p>
           )}
         </div>
       )}

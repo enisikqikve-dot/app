@@ -8,7 +8,30 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 6 – Glaube ✅
+## Stand: Meilenstein 7 – Stämme & Konflikte ✅
+
+**Neu: Aus Gruppen werden Völker. Sie handeln miteinander, streiten und führen Kriege.**
+
+- **Völker mit Namen, Farbe und Kultur:** Alle Gruppen gleicher Herkunft bilden ein Volk, zum Beispiel das „Volk der Taho“.
+  - Die Kleidung zeigt die Farbe des Volkes, an jeder Feuerstelle weht seine Fahne.
+  - Die Kultur entsteht aus den Menschen und der Geschichte: friedlich oder kriegerisch, fromm oder weltlich, offen oder verschlossen.
+  - Der Anführer der größten Gruppe ist Häuptling des Volkes.
+- **Abspaltung:** Eine Gruppe, die lange weit weg lebt oder sich mit dem Häuptling zerstreitet, wird zu einem neuen Volk mit eigenem Namen.
+  - Menschen, die du fern von allen anderen erschaffst, sind ein fremdes Volk.
+- **Begegnung und Tauschhandel:** Nachbarn begegnen sich und tauschen Nahrung, und mit den Waren wandern auch Ideen. Handel macht Völker zu Freunden.
+- **Beziehungen zwischen Völkern:** befreundet, freundlich, neutral, misstrauisch, verfeindet oder im Krieg.
+  - Was sie verbindet: Gespräche, Hochzeiten, Handel.
+  - Was sie trennt: Streit, Diebstahl, Hunger um dieselben Jagdgründe, verschiedene Götter, kriegerische Nachbarn.
+- **Verbrechen:** Hungrige stehlen Vorräte fremder Gruppen. Aus Hass kann (selten) Mord werden.
+  - Wer erwischt wird, gilt als Dieb oder Mörder, und Wiederholungstäter werden verbannt.
+- **Krieg:** Verfeindete Nachbarn ziehen in den Krieg: um Land, aus Rache, um des Glaubens willen, aus Hunger oder aus Machtgier.
+  - In Schlachten zählen Mut, Waffen (Speer, Bogen) und der Heimvorteil.
+  - Geschlagene Gruppen werden unterworfen oder fliehen weit weg.
+  - Irgendwann schließen die Völker Frieden. Ein **geflüsterter Frieden** an einen Anführer beendet den Krieg sofort, **Zorn** an einen Häuptling vergiftet die Beziehungen.
+- **Neuer Reiter „Völker“ in der Chronik** mit allen Völkern, Kultur, Häuptling, Glaube, Beziehungen und Kriegen (Grund, Schlachten, Gefallene, Sieger). Dazu ein neuer Chronik-Filter **„Konflikte“**.
+- **Akte:** Volk des Menschen; Zeichen „Dieb“ oder „Mörder“.
+
+### Meilenstein 6 – Glaube ✅
 
 **Neu: Die Menschen entdecken dich. Was sie von dir sehen, prägt, woran sie glauben.**
 

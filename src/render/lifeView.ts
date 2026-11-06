@@ -209,6 +209,17 @@ function shrineGeometry(): THREE.BufferGeometry {
   return g;
 }
 
+/** A pole with a flag in the colour of the people. */
+function bannerGeometry(): THREE.BufferGeometry {
+  const g = mergeGeometries([
+    painted(new THREE.CylinderGeometry(0.008, 0.01, 0.46, 5).translate(0, 0.23, 0), 0x6a5038),
+    painted(new THREE.BoxGeometry(0.17, 0.1, 0.008).translate(0.09, 0.39, 0), 0xffffff),
+  ])!;
+  g.scale(1.6, 1.6, 1.6);
+  g.computeVertexNormals();
+  return g;
+}
+
 function glowTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -259,6 +270,9 @@ export class LifeView {
   private readonly huts: THREE.InstancedMesh;
   private readonly fireplaces: THREE.InstancedMesh;
   private readonly shrines: THREE.InstancedMesh;
+  private readonly banners: THREE.InstancedMesh;
+  /** Colour of each group's people (only when there is more than one people). */
+  private tribeColor = new Map<number, THREE.Color>();
   private readonly flames: THREE.InstancedMesh;
   private readonly fireGlow: THREE.Points;
   private readonly glowPositions: Float32Array;
@@ -271,6 +285,7 @@ export class LifeView {
   private readonly s = new THREE.Vector3();
   private readonly v = new THREE.Vector3();
   private readonly w = new THREE.Vector3();
+  private readonly w2 = new THREE.Vector3();
   private readonly c = new THREE.Color();
 
   constructor(
@@ -301,6 +316,8 @@ export class LifeView {
     }
     this.huts = new THREE.InstancedMesh(hutGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 }), MAX_STRUCTURES);
     this.fireplaces = new THREE.InstancedMesh(fireplaceGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }), MAX_FIRES);
+    this.banners = new THREE.InstancedMesh(bannerGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.8 }), MAX_FIRES);
+    this.banners.setColorAt(0, new THREE.Color(1, 1, 1));
     this.shrines = new THREE.InstancedMesh(shrineGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }), MAX_FIRES);
     this.flames = new THREE.InstancedMesh(
       new THREE.ConeGeometry(0.05, 0.16, 6).translate(0, 0.1, 0),
@@ -317,7 +334,7 @@ export class LifeView {
     );
     this.fireGlow.frustumCulled = false;
     this.group.add(this.fireGlow);
-    for (const mesh of [this.body, this.head, this.hair, this.graves, this.huts, this.fireplaces, this.shrines, this.flames]) {
+    for (const mesh of [this.body, this.head, this.hair, this.graves, this.huts, this.fireplaces, this.shrines, this.banners, this.flames]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
       this.group.add(mesh);
@@ -389,6 +406,14 @@ export class LifeView {
     let graves = 0;
     let dots = 0;
     const near = cameraDistance < 70;
+    // Several peoples: their clothes and banners show their colour.
+    this.tribeColor.clear();
+    if (life.tribes.living().length > 1) {
+      for (const b of life.bands) {
+        const tr = life.tribes.tribe(b.tribe);
+        if (tr) this.tribeColor.set(b.id, new THREE.Color().setHSL(tr.hue, 0.6, 0.5));
+      }
+    }
 
     const grave = (cell: number, spot: [number, number]) => {
       if (graves >= MAX_GRAVES || !near) return;
@@ -442,7 +467,10 @@ export class LifeView {
       this.head.setMatrixAt(n, this.m);
       this.hair.setMatrixAt(n, this.m);
       if (p.alive) {
-        this.body.setColorAt(n, this.c.setHex(CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]));
+        this.c.setHex(CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]);
+        const tribe = this.tribeColor.get(p.band);
+        if (tribe) this.c.lerp(tribe, 0.45);
+        this.body.setColorAt(n, this.c);
         this.head.setColorAt(n, this.c.copy(SKIN_LIGHT).lerp(SKIN_DARK, p.look.skin));
         this.hair.setColorAt(n, this.c.setHex(HAIR_COLORS[age >= 52 ? HAIR_GREY : p.look.hair] ?? HAIR_COLORS[0]));
       } else {
@@ -481,6 +509,7 @@ export class LifeView {
     let huts = 0;
     let fires = 0;
     let shrines = 0;
+    let banners = 0;
     if (near) {
       for (const st of life.structures) {
         entityDir(this.planet, st.cell, -1, 0, st.spot, this.v);
@@ -503,6 +532,14 @@ export class LifeView {
           orient(this.v, hash(st.id) * Math.PI * 2, this.q);
           this.m.compose(this.w, this.q, this.s.setScalar(1));
           this.fireplaces.setMatrixAt(fires, this.m);
+          const color = this.tribeColor.get(st.band);
+          if (color && banners < MAX_FIRES) {
+            // The banner stands a little beside the fire.
+            this.w2.set(1, 0, 0.6).applyQuaternion(this.q).multiplyScalar(0.4).add(this.w);
+            this.m.compose(this.w2, this.q, this.s.setScalar(1));
+            this.banners.setMatrixAt(banners, this.m);
+            this.banners.setColorAt(banners++, color);
+          }
           const lit = gameMinutes - st.used < 2 * MINUTES_PER_DAY;
           const flick = lit ? 0.75 + 0.35 * Math.sin(now * 13 + st.id) * Math.sin(now * 7.3 + st.id * 2) : 0.001;
           this.m.compose(this.w, this.q, this.s.set(flick, lit ? flick * 1.2 : 0.001, flick));
@@ -520,6 +557,9 @@ export class LifeView {
     this.fireplaces.instanceMatrix.needsUpdate = true;
     this.shrines.count = shrines;
     this.shrines.instanceMatrix.needsUpdate = true;
+    this.banners.count = banners;
+    this.banners.instanceMatrix.needsUpdate = true;
+    if (this.banners.instanceColor) this.banners.instanceColor.needsUpdate = true;
     this.flames.count = fires;
     this.flames.instanceMatrix.needsUpdate = true;
     this.fireGlow.geometry.setDrawRange(0, fires);

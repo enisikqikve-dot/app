@@ -107,6 +107,9 @@ export interface PersonInfo {
   know: InventionId[];
   task: Task | null;
   teacher: boolean;
+  /** The people (Volk) they belong to, and what they did wrong. */
+  tribe: { name: string; hue: number } | null;
+  crimes: number;
   /** How strongly they believe (0–1), in what, and whether they lead the rites. */
   faith: number;
   belief: Deity | null;
@@ -139,7 +142,7 @@ export interface FamilyTree {
   grandchildren: number;
 }
 
-export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'knowledge' | 'animals' | 'faith' | 'nature';
+export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'conflict' | 'knowledge' | 'animals' | 'faith' | 'nature';
 
 export interface ChronicleLine {
   index: number;
@@ -150,6 +153,10 @@ export interface ChronicleLine {
   c?: string;
   n?: number;
   s?: string;
+  /** Names of the peoples the line is about. */
+  tribe?: string;
+  other?: string;
+  winner?: string;
   major: boolean;
   category: ChronicleCategory;
   /** The person to open when the line is tapped. */
@@ -202,6 +209,43 @@ export interface FaithInfo {
   prayers: PrayerInfo[];
 }
 
+export type RelationState = 'war' | 'hostile' | 'tense' | 'neutral' | 'friendly' | 'close';
+
+export interface TribeInfo {
+  id: number;
+  name: string;
+  hue: number;
+  population: number;
+  groups: number;
+  chief: string | null;
+  chiefId: number;
+  /** Warlike, pious, open (0–100). */
+  culture: [number, number, number];
+  origin: 'first' | 'split' | 'far' | 'appeared';
+  parent: string | null;
+  foundedYear: number;
+  endedYear: number | null;
+  religion: Deity | null;
+  relations: { id: number; name: string; hue: number; value: number; state: RelationState; traded: boolean }[];
+}
+
+export interface WarInfo {
+  id: number;
+  a: { name: string; hue: number };
+  b: { name: string; hue: number };
+  reason: 'land' | 'revenge' | 'faith' | 'hunger' | 'ambition';
+  startYear: number;
+  endYear: number | null;
+  dead: [number, number];
+  battles: number;
+  winner: string | null;
+}
+
+export interface PeoplesInfo {
+  tribes: TribeInfo[];
+  wars: WarInfo[];
+}
+
 export interface SpeciesInfo {
   id: number;
   base: SpeciesId;
@@ -235,6 +279,18 @@ const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
   speciesGone: 'animals',
   shaman: 'faith',
   religion: 'faith',
+  tribe: 'groups',
+  tribeGone: 'groups',
+  contact: 'groups',
+  trade: 'groups',
+  chief: 'groups',
+  theft: 'conflict',
+  murder: 'conflict',
+  banished: 'conflict',
+  war: 'conflict',
+  battle: 'conflict',
+  peace: 'conflict',
+  conquered: 'conflict',
   religionGone: 'faith',
   answered: 'faith',
 };
@@ -337,6 +393,8 @@ export class PeopleInfo {
       know: listOf(x.know ?? 0),
       task: living?.alive && this.life.ageOf(x) >= 14 ? (living.task ?? 'gather') : null,
       teacher: !!living?.teacher && living.teacher > t,
+      tribe: this.tribeOf(x.band),
+      crimes: living?.crimes ?? 0,
       faith: living ? (living.faith ?? 0) : 0,
       belief: this.deityOf(x.belief),
       shaman: !!x.shaman,
@@ -414,6 +472,10 @@ export class PeopleInfo {
     if (e.s !== undefined) line.s = e.s;
     if (e.a !== undefined && e.key !== 'power' && e.key !== 'sign' && e.key !== 'species') line.person = e.a;
     else if (e.key === 'power' && e.s === 'revive') line.person = e.a;
+    const tribes = this.life.tribes;
+    if (e.x !== undefined) line.tribe = tribes.tribe(e.x)?.name;
+    if (e.y !== undefined) line.other = tribes.tribe(e.y)?.name;
+    if (e.key === 'peace' && e.s) line.winner = tribes.tribe(Number(e.s))?.name;
     if ((e.key === 'religion' || e.key === 'religionGone') && e.n !== undefined) {
       const rel = this.life.faith.religion(e.n);
       if (rel) line.s = rel.deity;
@@ -450,6 +512,71 @@ export class PeopleInfo {
       if (first) info.first = first;
       return info;
     });
+  }
+
+  private tribeOf(bandId: number): { name: string; hue: number } | null {
+    const tr = this.life.tribes.tribeOfBand(bandId);
+    return tr ? { name: tr.name, hue: tr.hue } : null;
+  }
+
+  /** The peoples, how they get along, and their wars. */
+  peoples(): PeoplesInfo {
+    const life = this.life;
+    const sys = life.tribes;
+    const size = new Map<number, { people: number; groups: number }>();
+    for (const b of life.bands) {
+      if (b.tribe === undefined) continue;
+      const s = size.get(b.tribe) ?? { people: 0, groups: 0 };
+      s.people += life.members(b.id).length;
+      s.groups++;
+      size.set(b.tribe, s);
+    }
+    const stateOf = (a: number, b: number, v: number): RelationState =>
+      sys.war(a, b) ? 'war' : v <= -35 ? 'hostile' : v <= -10 ? 'tense' : v < 15 ? 'neutral' : v < 45 ? 'friendly' : 'close';
+    const tribes = sys.tribes
+      .map((tr): TribeInfo => {
+        const s = size.get(tr.id) ?? { people: 0, groups: 0 };
+        const rel = tr.ended === undefined ? sys.mainBelief(tr) : -1;
+        return {
+          id: tr.id,
+          name: tr.name,
+          hue: tr.hue,
+          population: s.people,
+          groups: s.groups,
+          chief: tr.ended === undefined ? (this.name(tr.chief) ?? null) : null,
+          chiefId: tr.chief,
+          culture: [tr.culture[0], tr.culture[1], tr.culture[2]],
+          origin: tr.origin,
+          parent: tr.parent !== undefined ? (sys.tribe(tr.parent)?.name ?? null) : null,
+          foundedYear: dateFromMinutes(tr.founded).year,
+          endedYear: tr.ended !== undefined ? dateFromMinutes(tr.ended).year : null,
+          religion: this.deityOf(rel),
+          relations: tr.rel
+            .map(([id, v]) => ({ other: sys.tribe(id), v }))
+            .filter((r) => r.other && r.other.ended === undefined)
+            .map(({ other, v }) => ({ id: other!.id, name: other!.name, hue: other!.hue, value: Math.round(v), state: stateOf(tr.id, other!.id, v), traded: !!tr.traded?.includes(other!.id) }))
+            .sort((a, b) => a.value - b.value),
+        };
+      })
+      .sort((a, b) => (a.endedYear === null ? 0 : 1) - (b.endedYear === null ? 0 : 1) || b.population - a.population);
+    const side = (id: number) => {
+      const tr = sys.tribe(id);
+      return { name: tr?.name ?? '?', hue: tr?.hue ?? 0 };
+    };
+    const wars = sys.wars
+      .map((w): WarInfo => ({
+        id: w.id,
+        a: side(w.a),
+        b: side(w.b),
+        reason: w.reason,
+        startYear: dateFromMinutes(w.start).year,
+        endYear: w.end !== undefined ? dateFromMinutes(w.end).year : null,
+        dead: [w.dead[0], w.dead[1]],
+        battles: w.battles,
+        winner: w.winner !== undefined ? (sys.tribe(w.winner)?.name ?? null) : null,
+      }))
+      .sort((a, b) => (a.endYear === null ? 0 : 1) - (b.endYear === null ? 0 : 1) || b.startYear - a.startYear);
+    return { tribes, wars };
   }
 
   private deityOf(id: number | undefined): Deity | null {

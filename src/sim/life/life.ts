@@ -26,6 +26,7 @@ import { SPECIES, SPECIES_IDS, habitatScore } from './species';
 import { childLook, childTraits, founderLook, hashUnit, randomTraits, type RandomSource } from './genetics';
 import { FLAG_FREEZING, moodReasons, moodValue, type MoodReason } from './mood';
 import { FaithSystem } from './faith';
+import { TribeSystem } from './tribes';
 import {
   BIT,
   INVENTION_IDS,
@@ -213,6 +214,9 @@ export class Life {
   private idea: InventionId | undefined;
   /** Belief and religion (state lives in the data). */
   readonly faith = new FaithSystem(this);
+  readonly tribes = new TribeSystem(this);
+  /** The world during a step (not saved). */
+  private stepWorld: World | null = null;
   /** How many talks one talk stands for (time skip). */
   private weight = 1;
   private readonly byCell = new Map<number, Person[]>();
@@ -580,6 +584,7 @@ export class Life {
   }
 
   private step(world: World, k: number): void {
+    this.stepWorld = world;
     this.ensureBands(world);
     const t = this.data.t;
     const tick = Math.round(t / TICK);
@@ -737,7 +742,7 @@ export class Life {
     this.log(p, 'died', { cause });
     this.data.deaths = (this.data.deaths ?? 0) + 1;
     // The chronicle names everyone while the world is small, later only notable people.
-    const notable = wasLeader || age >= 70 || p.log.some((l) => l.key === 'invented') || !['age', 'sickness', 'hunger', 'thirst', 'cold'].includes(cause);
+    const notable = wasLeader || age >= 70 || p.log.some((l) => l.key === 'invented') || !['age', 'sickness', 'hunger', 'thirst', 'cold', 'war', 'murder'].includes(cause);
     if (notable || this.population() < SMALL_WORLD) this.chron('death', { a: p.id, n: Math.floor(age), s: cause, ...(wasLeader ? { major: 1 as const } : {}) });
     this.invalidateKnowledge();
     this.checkLostKnowledge(p.know);
@@ -1260,6 +1265,7 @@ export class Life {
       p.task = this.chooseTask(p, world, age);
     }
     this.faith.personDaily(p, age);
+    this.tribes.personDaily(p, world, age);
 
     if (p.sex === 'f' && !p.pregnant && p.partner >= 0) this.tryConceive(p, world, t, age);
     if (p.partner < 0 && age >= 17 && age <= 35 && !this.isLeader(p) && this.rng.chance(0.012)) this.seekPartner(p, world);
@@ -1424,6 +1430,11 @@ export class Life {
     this.addOp(p, id, v);
   }
 
+  /** @internal */
+  addOpinion(p: Person, id: number, dv: number): void {
+    this.addOp(p, id, dv);
+  }
+
   private addOp(p: Person, id: number, dv: number): void {
     if (id === p.id) return;
     const r = this.findRel(p, id);
@@ -1531,6 +1542,7 @@ export class Life {
       this.log(x, 'partner', { other: y.id });
       this.addMood(x, 'partner', 20, 20, y.id);
     }
+    this.tribes.onCouple(a, b);
     const [f, m] = a.sex === 'f' ? [a, b] : [b, a];
     this.chron('couple', { a: f.id, b: m.id });
   }
@@ -1628,6 +1640,7 @@ export class Life {
     const until = t + (k === 1 ? 3 : 1) * TICK * k;
     p.chat = { kind, with: q.id, until };
     q.chat = { kind, with: p.id, until };
+    this.tribes.onTalk(p, q, kind === 'quarrel', w);
     if (kind !== 'quarrel') {
       this.faith.onTalk(p, q, w);
       // Talking passes knowledge on.
@@ -1681,6 +1694,8 @@ export class Life {
           this.log(p, 'fight', { other: q.id });
           this.log(q, 'fight', { other: p.id });
           this.addOp(q, p.id, -15);
+          this.tribes.onFight(p, q);
+          if (this.stepWorld) this.tribes.maybeMurder(p, q, this.stepWorld);
         }
         break;
       }
@@ -1784,6 +1799,7 @@ export class Life {
     this.dailyCamps(t, members);
     this.dailySpecies(world, t);
     this.faith.bandsDaily(world, t);
+    this.tribes.daily(world, t);
   }
 
   // ------------------------------------------------------------ knowledge
@@ -2228,7 +2244,8 @@ export class Life {
    * Someone leaves with their partner and young children to find a new home
    * far away, and founds a new group. A leader takes the whole group along.
    */
-  private emigrate(p: Person, world: World, t: number): boolean {
+  /** @internal */
+  emigrate(p: Person, world: World, t: number): boolean {
     const dest = this.farPlace(p, world, t);
     if (dest < 0) return false;
     const band = this.bandById.get(p.band);
@@ -2247,6 +2264,7 @@ export class Life {
       if (q.mother === p.id || q.father === p.id || (partner && (q.mother === partner.id || q.father === partner.id))) movers.push(q);
     }
     const newBand = this.newBand(p.id);
+    if (band?.tribe !== undefined) newBand.tribe = band.tribe;
     this.invalidateKnowledge();
     for (const q of movers) {
       q.band = newBand.id;
@@ -2259,6 +2277,27 @@ export class Life {
     this.log(p, 'emigrated', { n: movers.length - 1 });
     if (partner && movers.includes(partner)) this.log(partner, 'emigrated', { n: movers.length - 1 });
     this.chron('emigrate', { a: p.id, n: movers.length, major: 1 });
+    return true;
+  }
+
+  /** Someone is sent away alone and must find a new home. @internal */
+  exile(p: Person, world: World): boolean {
+    const dest = this.farPlace(p, world, this.data.t);
+    if (dest < 0 || this.isLeader(p)) return false;
+    const old = this.bandById.get(p.band);
+    const band = this.newBand(p.id);
+    if (old?.tribe !== undefined) band.tribe = old.tribe;
+    this.invalidateKnowledge();
+    p.band = band.id;
+    p.next = -1;
+    p.path = [];
+    p.action = 'idle';
+    p.actionUntil = this.data.t;
+    p.dest = dest;
+    if (p.partner >= 0) {
+      const q = this.person(p.partner);
+      if (q?.alive) this.separate(p, q);
+    }
     return true;
   }
 
@@ -2792,6 +2831,8 @@ export class Life {
         const b = this.bandById.get(band);
         if (b && b.leader < 0) this.electLeader(b, false);
         if (made.length > 0) this.chron('newcomers', { n: made.length, a: made[0].id, major: 1 });
+        // Far from everyone else they are a people of their own.
+        if (b && near === undefined && made.length > 0 && this.tribes.tribes.length > 0) this.tribes.found(b, 'appeared');
         break;
       }
       case 'spawnAnimals': {
@@ -2961,6 +3002,7 @@ export class Life {
         p.feel = { kind: 'anger', until: t + 15 * DAY };
         this.addMood(p, 'anger', -10, 15);
         this.log(p, 'angry');
+        this.tribes.onAngerWhisper(p);
         return 'accepted';
       case 'wForgive':
         if (!take(0.9 - tr[T_AGGRESSIVE] / 220)) return 'resisted';
@@ -3003,6 +3045,7 @@ export class Life {
         if (p.feel?.kind === 'anger') p.feel = undefined;
         this.addMood(p, 'peace', 10, 15);
         this.log(p, 'madePeace');
+        if (this.isLeader(p)) this.tribes.onPeaceWhisper(p);
         return 'accepted';
       }
       case 'wIdea': {
