@@ -5,10 +5,10 @@
 
 export type Sex = 'f' | 'm';
 
-export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried' | 'eat' | 'hunt' | 'fish' | 'build' | 'heal' | 'teach' | 'tinker' | 'fire' | 'pray' | 'farm';
+export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried' | 'eat' | 'hunt' | 'fish' | 'build' | 'heal' | 'teach' | 'tinker' | 'fire' | 'pray' | 'farm' | 'smith' | 'trade' | 'guard' | 'study' | 'celebrate' | 'mourn';
 
 /** Why a person is walking somewhere. */
-export type Goal = 'water' | 'food' | 'group' | 'family' | 'wander' | 'safety' | 'hunt' | 'work' | 'none';
+export type Goal = 'water' | 'food' | 'group' | 'family' | 'wander' | 'safety' | 'hunt' | 'work' | 'gathering' | 'none';
 
 export type DeathCause =
   | 'hunger'
@@ -99,7 +99,14 @@ export type LogKey =
   | 'built'
   | 'cyborg'
   | 'cloned'
-  | 'arrived';
+  | 'arrived'
+  | 'dream'
+  | 'dreamDone'
+  | 'wedding'
+  | 'feast'
+  | 'funeral'
+  | 'bestFriend'
+  | 'feud';
 
 export interface LogEntry {
   t: number;
@@ -140,7 +147,13 @@ export type MoodKey =
   | 'defeat'
   | 'robbed'
   | 'rich'
-  | 'poor';
+  | 'poor'
+  | 'wedding'
+  | 'feast'
+  | 'mourned'
+  | 'dream'
+  | 'regret'
+  | 'feud';
 
 export interface Moodlet {
   key: MoodKey;
@@ -242,6 +255,11 @@ export interface Person {
   cloneOf?: number;
   /** Came from the future in a time machine. */
   traveler?: boolean;
+  /** What this person dreams of achieving in life, and whether it came true. */
+  dream?: DreamId;
+  dreamDone?: boolean;
+  /** Huts and houses helped to build (for the dream of building). */
+  built?: number;
 
   /** Cell the person is in (or leaving). */
   cell: number;
@@ -301,6 +319,35 @@ export interface ArchivedPerson {
   /** The religion this person followed, and whether they led its rites. */
   belief?: number;
   shaman?: boolean;
+  /** Their life dream, and whether it came true. */
+  dream?: DreamId;
+  dreamDone?: boolean;
+}
+
+export type DreamId = 'explore' | 'lead' | 'invent' | 'family' | 'wealth' | 'faith' | 'glory' | 'build';
+export const DREAMS: DreamId[] = ['explore', 'lead', 'invent', 'family', 'wealth', 'faith', 'glory', 'build'];
+
+/** People coming together: a wedding, a feast or a funeral. */
+export interface Gathering {
+  id: number;
+  kind: 'wedding' | 'feast' | 'funeral';
+  band: number;
+  cell: number;
+  start: number;
+  until: number;
+  /** Who it is for (the couple, the dead). */
+  a?: number;
+  b?: number;
+}
+
+/** A feud between two families (each named after its head). */
+export interface Feud {
+  id: number;
+  a: number;
+  b: number;
+  since: number;
+  reason: 'murder' | 'fight' | 'theft';
+  ended?: number;
 }
 
 /** A group of people who live and move together. */
@@ -396,6 +443,8 @@ export interface Tribe {
   treasury?: number;
   /** Discontent 0 … 1. */
   unrest?: number;
+  /** Has held a harvest feast. */
+  feasted?: boolean;
 }
 
 export type WarReason = 'land' | 'revenge' | 'faith' | 'hunger' | 'ambition';
@@ -508,7 +557,11 @@ export type ChronicleKey =
   | 'weatherShield'
   | 'timeTraveler'
   | 'godFound'
-  | 'uprising';
+  | 'uprising'
+  | 'dream'
+  | 'feast'
+  | 'feud'
+  | 'feudEnd';
 
 /** One line in the world chronicle. */
 export interface ChronicleEntry {
@@ -606,6 +659,9 @@ export interface LifeData {
   godFound?: boolean;
   /** When the first people appeared (to rebuild the world from a code). */
   start?: number;
+  /** Weddings, feasts and funerals going on, and feuds between families. */
+  gatherings?: Gathering[];
+  feuds?: Feud[];
   /** Append-only: one row of numbers per year (see HISTORY_FIELDS). */
   history?: number[][];
   historyCount?: number;

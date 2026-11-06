@@ -73,6 +73,7 @@ export class PoliticsSystem {
     const life = this.life;
     tribe.chief = p.id;
     life.log(p, how === 'elected' ? 'elected' : 'ruler');
+    life.society.achieve(p, 'lead');
     life.chron('ruler', { a: p.id, x: tribe.id, s: `${this.gov(tribe)}:${how}`, major: 1 });
   }
 

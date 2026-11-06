@@ -186,6 +186,7 @@ export class TribeSystem {
     life.log(p, 'murdered', { other: q.id });
     p.crimes = (p.crimes ?? 0) + 3;
     life.chron('murder', { a: p.id, b: q.id, major: 1 });
+    life.society.wrong(p, q, 'murder');
     // The family and friends of the dead hate the murderer.
     for (const r of life.people) {
       if (!r.alive || r === p) continue;
@@ -234,6 +235,7 @@ export class TribeSystem {
       life.addMood(leader, 'robbed', -6, 6);
     }
     life.chron('theft', { a: p.id, ...(leader ? { b: leader.id } : {}) });
+    if (leader?.alive) life.society.wrong(p, leader, 'theft');
     const x = own?.tribe;
     const y = victim.tribe;
     if (x !== undefined && y !== undefined && x !== y) {
@@ -583,7 +585,7 @@ export class TribeSystem {
       const tr = this.tribe(band.tribe);
       const k = (id: Parameters<typeof civ.knows>[1], f: number) => (civ.knows(tr, id) ? f : 0);
       const arms = 1 + (know & BIT.spear ? 0.3 : 0) + (know & BIT.bow ? 0.4 : 0) + k('bronze', 0.3) + k('iron', 0.4) + k('gunpowder', 0.9) + k('steam', 0.4) + k('flight', 0.7) + k('computer', 0.4) + life.future.warBonus(tr);
-      return list.reduce((s, p) => s + 0.5 + p.traits[T_BRAVE] / 200 + p.traits[T_AGGRESSIVE] / 250 + (p.feel?.kind === 'courage' ? 0.4 : 0) - (p.feel?.kind === 'fear' ? 0.3 : 0), 0) * arms * (home ? 1.15 : 1);
+      return list.reduce((s, p) => s + (p.task === 'guard' ? 0.5 : 0) + 0.5 + p.traits[T_BRAVE] / 200 + p.traits[T_AGGRESSIVE] / 250 + (p.feel?.kind === 'courage' ? 0.4 : 0) - (p.feel?.kind === 'fear' ? 0.3 : 0), 0) * arms * (home ? 1.15 : 1);
     };
     const pa = power(fa, ga, false);
     const pb = power(fb, gb, true);
@@ -619,6 +621,7 @@ export class TribeSystem {
     for (const p of life.members(win.id)) {
       life.addMood(p, 'victory', 8, 15);
       life.log(p, 'battle', { n: 1 });
+      if (wf.includes(p)) life.society.achieve(p, 'glory');
     }
     for (const p of life.members(lose.id)) {
       life.addMood(p, 'defeat', -10, 20);

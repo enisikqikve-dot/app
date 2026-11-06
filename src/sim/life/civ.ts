@@ -202,6 +202,7 @@ export class CivSystem {
     const laws = tribe.laws ?? [];
     let income = 0.4 + p.traits[T_DILIGENT] / 150 + p.traits[T_CLEVER] / 300 + (p.task === 'farm' ? 0.2 : 0) + (life.isLeader(p) ? 0.8 : 0) + (tribe.chief === p.id ? 2 : 0);
     if (laws.includes('market')) income *= 1.1;
+    if (p.dream === 'wealth') income += 0.2;
     if (laws.includes('tax')) {
       const tax = income * 0.1;
       income -= tax;
@@ -363,11 +364,15 @@ export class CivSystem {
     const tech = tribe.tech ?? 0;
     // Many peoples search side by side; together they are not that much faster than one.
     const crowded = 1 / Math.sqrt(Math.max(1, life.tribes.living().length));
+    // Scholars at work make new knowledge come sooner.
+    let scholars = 0;
+    for (const b of bands) for (const p of life.members(b.id)) if (p.task === 'study') scholars++;
+    const learned = 1 + Math.min(0.5, scholars * 0.05);
     for (const id of civReady(tech, stone)) {
       const def = CIV_TECHS[id];
       if (def.settled && homes.length === 0) continue;
       if (def.minPop && pop < def.minPop) continue;
-      let chance = def.rate * Math.min(3, Math.sqrt(pop / 60)) * (0.6 + tribe.culture[2] / 100) * crowded;
+      let chance = def.rate * Math.min(3, Math.sqrt(pop / 60)) * (0.6 + tribe.culture[2] / 100) * crowded * learned;
       if (id === 'farming') {
         const seen = bands.reduce((m, b) => Math.max(m, b.seen?.[3] ?? 0), 0);
         chance *= 1 + Math.min(1, seen);
@@ -399,7 +404,10 @@ export class CivSystem {
         }
       }
     }
-    if (who && own) life.log(who, 'civInvented', { n: CIV_IDS.indexOf(id) });
+    if (who && own) {
+      life.log(who, 'civInvented', { n: CIV_IDS.indexOf(id) });
+      life.society.achieve(who, 'invent');
+    }
     // A new age of the world begins.
     const age = epochIndex(tribe.tech);
     if (age > (life.raw.epochRecord ?? 0)) {

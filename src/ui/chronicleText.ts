@@ -124,6 +124,14 @@ export function chronicleText(l: ChronicleLine, planet: string): string {
       return t('chron.godFound', { tribe: l.tribe ?? '?' });
     case 'uprising':
       return t('chron.uprising', { tribe: l.tribe ?? '?', other: l.other ?? '?', place: l.place ?? '?' });
+    case 'dream':
+      return t('chron.dream', { a, dream: t(`dream.${l.s ?? 'family'}` as MessageKey) });
+    case 'feast':
+      return t('chron.feast', { a, tribe: l.tribe ?? '?' });
+    case 'feud':
+      return t('chron.feud', { a, b, reason: t(`feud.reason.${l.s ?? 'fight'}` as MessageKey) });
+    case 'feudEnd':
+      return t(`chron.feudEnd.${l.s ?? 'time'}` as MessageKey, { a, b, c });
     case 'overseas':
       return t('chron.overseas', { place: l.place ?? '?', from: l.from ?? '?', tribe: l.tribe ?? '?' });
     case 'epoch':

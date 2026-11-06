@@ -84,7 +84,8 @@ function wallGeometry(): THREE.BufferGeometry {
 function gable(w: number, d: number, h: number, y: number, color: number): THREE.BufferGeometry {
   const g = new THREE.CylinderGeometry(1, 1, w, 3, 1);
   g.rotateZ(Math.PI / 2);
-  g.rotateX(Math.PI / 6 + Math.PI);
+  // Turn the triangle so its ridge points up.
+  g.rotateX(-Math.PI / 2);
   g.scale(1, h / 1.5, d / 1.732);
   g.translate(0, y + h / 3, 0);
   return painted(g, color);

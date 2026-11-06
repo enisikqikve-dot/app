@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { formatNumber, t, type MessageKey } from '../i18n';
 import type { HerdInfo, PersonInfo } from '../game/Game';
 import type { PersonRef, RelationInfo } from '../game/peopleInfo';
-import { TRAITS } from '../sim/life/types';
+import { DREAMS, TRAITS } from '../sim/life/types';
 import { biomeName } from './format';
 import { civName, deityName, geneWords, inventionName, rulerTitle, speciesName } from './names';
 import { CIV_IDS } from '../sim/life/civtech';
@@ -96,6 +96,8 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
             {p.lucky && <span class="chip chip-gold">{t('person.lucky')}</span>}
             {p.teacher && <span class="chip chip-cond">{t('person.teacherChip')}</span>}
             {p.kind && <span class="chip chip-cold">{t(`person.kind.${p.kind}` as MessageKey)}</span>}
+            {p.alive && !p.kind && p.job !== 'child' && <span class="chip chip-cond">{t(`job.${p.job}.${p.sex}` as MessageKey)}</span>}
+            {p.gathering && <span class="chip chip-gold">{t(`gathering.${p.gathering}` as MessageKey)}</span>}
             {p.cyborg && <span class="chip chip-cold">{t('person.cyborg')}</span>}
             {p.traveler && <span class="chip chip-gold">{t('person.traveler')}</span>}
             {p.ruler && <span class="chip chip-gold">{rulerTitle(p.ruler, p.sex)}</span>}
@@ -177,6 +179,15 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
               </div>
             )}
           </div>
+          {p.dream && (
+            <div class="kin">
+              <h3>{t('person.dream')}</h3>
+              <p class="note">
+                {t(`dream.${p.dream}` as MessageKey)}
+                {p.dreamDone ? ` · ${t('person.dreamDone')}` : p.alive ? '' : ` · ${t('person.dreamNever')}`}
+              </p>
+            </div>
+          )}
           {p.task && (
             <p class="note">
               {t('person.task')}: {t(`task.${p.task}` as MessageKey)}
@@ -218,6 +229,18 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
           <Names label={t('person.siblings')} people={p.siblings} onPerson={onPerson} />
           <Names label={t('person.children')} people={p.children} onPerson={onPerson} />
           <Names label={t('person.formerPartners')} people={p.formerPartners} onPerson={onPerson} />
+          {p.bestFriend && <Names label={t('person.bestFriend')} people={[p.bestFriend]} onPerson={onPerson} />}
+          {p.rival && <Names label={t('person.rival')} people={[p.rival]} onPerson={onPerson} />}
+          {p.feuds.length > 0 && (
+            <div class="kin">
+              <h3>{t('person.feuds')}</h3>
+              {p.feuds.map((f, i) => (
+                <p key={i} class="note">
+                  {t('person.feud', { name: f.with, year: formatNumber(f.since), reason: t(`feud.reason.${f.reason}` as MessageKey) })}
+                </p>
+              ))}
+            </div>
+          )}
           <Names label={t('person.friends')} people={p.friends} onPerson={onPerson} opinion />
           <Names label={t('person.foes')} people={p.foes} onPerson={onPerson} opinion />
         </div>
@@ -240,6 +263,7 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
                       second: l.second ?? '?',
                       sign: l.key === 'sawSign' ? t(`sign.${l.n ?? 0}` as MessageKey) : '',
                       invention: l.key === 'invented' || l.key === 'learned' ? inventionName(INVENTION_IDS[l.n ?? 0] ?? 'tools') : l.key === 'civInvented' ? civName(CIV_IDS[l.n ?? 0] ?? 'farming') : '',
+                      dream: l.key === 'dream' || l.key === 'dreamDone' ? t(`dream.${DREAMS[l.n ?? 0] ?? 'family'}` as MessageKey) : '',
                       animal: l.key === 'hunted' ? t(`speciesOne.${SPECIES_IDS[l.n ?? 0] ?? 'deer'}` as MessageKey) : '',
                     })}
                   </span>

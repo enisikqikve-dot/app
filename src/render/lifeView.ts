@@ -18,10 +18,10 @@ import { MINUTES_PER_DAY, MINUTES_PER_YEAR } from '../sim/clock';
 import { SPECIES_IDS } from '../sim/life/species';
 import { epochIndex } from '../sim/life/civtech';
 import { styleFor } from './styles';
+import { Figures } from './figures';
 import type { TerrainView } from './terrain';
 import { R } from './scale';
 
-const PERSON_SCALE = 1.45;
 /** Clothes of later ages: linen, dyed cloth, dark suits, bright modern colours. */
 const EPOCH_CLOTHES = [
   null,
@@ -107,13 +107,6 @@ export function entityDir(planet: PlanetData, cell: number, next: number, progre
   return out;
 }
 
-function personGeometries(): { body: THREE.BufferGeometry; head: THREE.BufferGeometry; hair: THREE.BufferGeometry } {
-  const body = new THREE.CylinderGeometry(0.032, 0.056, 0.15, 7).translate(0, 0.075, 0);
-  const head = new THREE.IcosahedronGeometry(0.042, 1).translate(0, 0.19, 0);
-  const hair = new THREE.SphereGeometry(0.046, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.193, 0);
-  for (const g of [body, head, hair]) g.scale(PERSON_SCALE, PERSON_SCALE, PERSON_SCALE);
-  return { body, head, hair };
-}
 
 /** A simple four-legged animal, oriented along +z. Colors are baked in (body, legs, tusks). */
 function animalGeometry(species: SpeciesId): THREE.BufferGeometry {
@@ -277,9 +270,11 @@ export interface ScreenEntity {
 
 export class LifeView {
   readonly group = new THREE.Group();
-  private readonly body: THREE.InstancedMesh;
-  private readonly head: THREE.InstancedMesh;
-  private readonly hair: THREE.InstancedMesh;
+  private readonly figures: Figures;
+  private readonly legColor = new THREE.Color();
+  private readonly skinColor = new THREE.Color();
+  private readonly hairColor = new THREE.Color();
+  private readonly faceColor = new THREE.Color();
   private readonly graves: THREE.InstancedMesh;
   private readonly animals: Record<SpeciesId, THREE.InstancedMesh>;
   private readonly dots: THREE.Points;
@@ -310,11 +305,7 @@ export class LifeView {
     private readonly planet: PlanetData,
     private readonly terrain: TerrainView,
   ) {
-    const geo = personGeometries();
-    const mat = () => new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.85 });
-    this.body = new THREE.InstancedMesh(geo.body, mat(), MAX_PEOPLE);
-    this.head = new THREE.InstancedMesh(geo.head, mat(), MAX_PEOPLE);
-    this.hair = new THREE.InstancedMesh(geo.hair, mat(), MAX_PEOPLE);
+    this.figures = new Figures(this.group, MAX_PEOPLE);
     const stones = mergeGeometries([
       new THREE.DodecahedronGeometry(0.05, 0).translate(0, 0.03, 0),
       new THREE.DodecahedronGeometry(0.035, 0).translate(0.045, 0.02, 0.02),
@@ -352,7 +343,7 @@ export class LifeView {
     );
     this.fireGlow.frustumCulled = false;
     this.group.add(this.fireGlow);
-    for (const mesh of [this.body, this.head, this.hair, this.graves, this.huts, this.fireplaces, this.shrines, this.banners, this.flames]) {
+    for (const mesh of [this.graves, this.huts, this.fireplaces, this.shrines, this.banners, this.flames]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
       this.group.add(mesh);
@@ -454,6 +445,7 @@ export class LifeView {
       grave(a.cell, a.spot);
     }
 
+    this.figures.begin();
     for (const p of life.people) {
       const recent = !p.alive && p.died !== undefined && gameMinutes - p.died < REVIVE_WINDOW;
       if (!p.alive && !recent) {
@@ -482,40 +474,51 @@ export class LifeView {
         this.q2.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
         this.q.multiply(this.q2);
         at.addScaledVector(up, 0.05);
-      } else if (p.action === 'walk') {
-        at.addScaledVector(up, Math.abs(Math.sin(now * 9 + p.id)) * 0.025);
       }
       this.m.compose(at, this.q, draw);
-      this.body.setMatrixAt(n, this.m);
-      this.head.setMatrixAt(n, this.m);
-      this.hair.setMatrixAt(n, this.m);
+      // Colours of clothes, skin and hair.
+      const cloth = this.c;
       if (p.alive && p.kind) {
         const m = p.kind === 'ai' ? AI : ROBOT;
-        this.body.setColorAt(n, m.body);
-        this.head.setColorAt(n, m.head);
-        this.hair.setColorAt(n, m.cap);
+        cloth.copy(m.body);
+        this.legColor.copy(m.body).multiplyScalar(0.8);
+        this.skinColor.copy(m.head);
+        this.hairColor.copy(m.cap);
+        this.faceColor.copy(m.cap);
       } else if (p.alive) {
         const style = this.bandStyle.get(p.band) ?? 0;
         const later = EPOCH_CLOTHES[style];
-        this.c.setHex(later ? later[p.look.clothes % later.length] : (CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]));
+        cloth.setHex(later ? later[p.look.clothes % later.length] : (CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]));
         const tribe = this.tribeColor.get(p.band);
-        if (tribe) this.c.lerp(tribe, 0.45);
-        if (p.traveler) this.c.copy(TRAVELER);
-        this.body.setColorAt(n, this.c);
-        this.head.setColorAt(n, this.c.copy(SKIN_LIGHT).lerp(SKIN_DARK, p.look.skin));
-        this.hair.setColorAt(n, p.cyborg ? CYBORG_CAP : this.c.setHex(HAIR_COLORS[age >= 52 ? HAIR_GREY : p.look.hair] ?? HAIR_COLORS[0]));
+        if (tribe) cloth.lerp(tribe, 0.45);
+        if (p.traveler) cloth.copy(TRAVELER);
+        this.legColor.copy(cloth).multiplyScalar(0.62);
+        this.skinColor.copy(SKIN_LIGHT).lerp(SKIN_DARK, p.look.skin);
+        this.hairColor.setHex(HAIR_COLORS[age >= 52 ? HAIR_GREY : p.look.hair] ?? HAIR_COLORS[0]);
+        if (p.cyborg) this.hairColor.copy(CYBORG_CAP);
+        this.faceColor.setHex(0x2a1d16);
       } else {
-        this.body.setColorAt(n, DEAD);
-        this.head.setColorAt(n, DEAD);
-        this.hair.setColorAt(n, DEAD);
+        cloth.copy(DEAD);
+        this.legColor.copy(DEAD);
+        this.skinColor.copy(DEAD);
+        this.hairColor.copy(DEAD);
+        this.faceColor.copy(DEAD);
       }
+      this.figures.add({
+        base: this.m,
+        action: p.alive ? p.action : 'idle',
+        talking: !!p.chat,
+        time: now,
+        id: p.id,
+        job: p.alive ? life.society.jobOf(p) : 'child',
+        female: p.sex === 'f' && !p.kind,
+        beard: p.sex === 'm' && !p.kind && age >= 25 && hash(p.id * 3 + 1) < 0.45,
+        lying,
+        colors: { cloth, legs: this.legColor, skin: this.skinColor, hair: this.hairColor, face: this.faceColor },
+      });
       n++;
     }
-    for (const mesh of [this.body, this.head, this.hair]) {
-      mesh.count = n;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    }
+    this.figures.end();
     this.graves.count = graves;
     this.graves.instanceMatrix.needsUpdate = true;
 

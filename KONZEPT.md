@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 6. November 2026 · Version 2.1 · Phase: Version 2.0 fertig, Ausbau (Meilensteine 12–15) geplant
+Stand: 6. November 2026 · Version 2.2 · Phase: Meilenstein 12 fertig (Lebendigere Menschen)
 
 ---
 
@@ -963,7 +963,7 @@ nächsten Schritte.
 | ✅ 9 | **Durch die Epochen** | Bronzezeit bis digitales Zeitalter (13 neue Erfindungen, 9 Zeitalter), Gebäude und Kleidung je Epoche, Seefahrt und Städte auf anderen Kontinenten, Leistung für Millionen Menschen |
 | ✅ 10 | **Sci-Fi-Zukunft** | Roboter, KI-Wesen und KI-Regierung, Cyborgs, Klone (auch als Kraft), fliegende Städte, Wettermaschinen gegen dein Wetter, Zeitreisende, die Menschen entdecken dich, Aufstand der Maschinen |
 | ✅ 11 | **Feinschliff** | Musik pro Epoche (live erzeugt), Film-Modus mit Untertiteln, Ich-Perspektive, Welt teilen als Datei und als Code mit ganzer Geschichte, Balancing |
-| 12 | **Lebendigere Menschen** | detailreiche Figuren mit Armen, Beinen, Gesichtern und Bewegungen; sichtbare Berufe; Feste, Hochzeiten und Trauerzüge; Lebensträume; beste Freunde, Rivalen und Familienfehden |
+| ✅ 12 | **Lebendigere Menschen** | detailreiche Figuren mit Armen, Beinen, Gesichtern und Bewegungen; sichtbare Berufe; Feste, Hochzeiten und Trauerzüge; Lebensträume; beste Freunde, Rivalen und Familienfehden |
 | 13 | **Neue Kräfte & Verehrung** | Finsternis, Komet, Nordlicht; Wunderbauwerk; Träume an ein ganzes Volk; Tierwunder; Opfer und Feste; Tempel für dich; Gebete über den Köpfen |
 | 14 | **Welt & Weltall** | Kartenansichten (Völker und Grenzen, Bevölkerung, Klima und Nahrung); Regen, Schnee auf Dächern, Nebel, Gewitter; Raketen, Satelliten und Mondbasis |
 | 15 | **Komfort** | Zeitsprung bis zum nächsten Ereignis; Startzahl wählbar; Chronik als Buch; Qualitätsstufen; automatische Sicherungen; einfacher Handy-Modus; Spiel ohne Ende nach der fernen Zukunft |

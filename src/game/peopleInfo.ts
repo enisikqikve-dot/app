@@ -19,9 +19,10 @@ import type {
   Person,
   Sex,
 } from '../sim/life/types';
-import { HAIR_GREY, type Deity, type GovForm, type LawId, type PrayerNeed, type SpeciesId } from '../sim/life/types';
+import { HAIR_GREY, type Deity, type DreamId, type GovForm, type LawId, type PrayerNeed, type SpeciesId } from '../sim/life/types';
 import { CIV_IDS, CIV_TECHS, epochOf, type CivEpoch, type CivId } from '../sim/life/civtech';
 import { HISTORY_FIELDS } from '../sim/life/civ';
+import type { Job } from '../sim/life/society';
 import { INVENTION_IDS, INVENTIONS, BIT, listOf, type InventionId, type Task } from '../sim/life/inventions';
 
 type Someone = Person | ArchivedPerson;
@@ -52,7 +53,15 @@ export type Activity =
   | 'teach'
   | 'tinker'
   | 'fire'
-  | 'pray';
+  | 'pray'
+  | 'farm'
+  | 'smith'
+  | 'trade'
+  | 'guard'
+  | 'study'
+  | 'celebrate'
+  | 'mourn'
+  | 'walk.gathering';
 
 export interface PersonRef {
   id: number;
@@ -121,6 +130,15 @@ export interface PersonInfo {
   home: string | null;
   /** A robot or an AI being; part machine; cloned from someone; from the future. */
   kind: 'robot' | 'ai' | null;
+  /** Trade, life dream, best friend, rival and family feuds. */
+  job: Job;
+  dream: DreamId | null;
+  dreamDone: boolean;
+  bestFriend: PersonRef | null;
+  rival: PersonRef | null;
+  feuds: { with: string; reason: 'murder' | 'fight' | 'theft'; since: number }[];
+  /** At a wedding, feast or funeral right now. */
+  gathering: 'wedding' | 'feast' | 'funeral' | null;
   cyborg: boolean;
   cloneOf: PersonRef | null;
   traveler: boolean;
@@ -371,6 +389,10 @@ const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
   timeTraveler: 'future',
   godFound: 'future',
   uprising: 'conflict',
+  dream: 'people',
+  feast: 'people',
+  feud: 'conflict',
+  feudEnd: 'conflict',
   religionGone: 'faith',
   answered: 'faith',
 };
@@ -480,6 +502,12 @@ export class PeopleInfo {
       ruler: alive && life.tribes.tribeOfBand(x.band)?.chief === x.id && life.tribes.tribeOfBand(x.band)!.gov !== undefined ? life.tribes.tribeOfBand(x.band)!.gov! : null,
       home: alive ? (life.civ.homeOf(x.band)?.name ?? null) : null,
       kind: living?.kind ?? null,
+      job: living?.alive ? life.society.jobOf(living) : 'child',
+      dream: x.dream ?? null,
+      dreamDone: !!x.dreamDone,
+      ...this.bondsOf(living ?? undefined),
+      feuds: living ? this.feudsOf(living) : [],
+      gathering: living?.alive && (living.action === 'celebrate' || living.action === 'mourn') ? (life.society.gatheringFor(living)?.kind ?? null) : null,
       cyborg: !!living?.cyborg,
       cloneOf: living?.cloneOf !== undefined ? this.ref(life.anyone(living.cloneOf)) : null,
       traveler: !!living?.traveler,
@@ -615,6 +643,20 @@ export class PeopleInfo {
       if (first) info.first = first;
       return info;
     });
+  }
+
+  private bondsOf(p: Person | undefined): { bestFriend: PersonRef | null; rival: PersonRef | null } {
+    if (!p?.alive) return { bestFriend: null, rival: null };
+    const b = this.life.society.bonds(p);
+    return { bestFriend: b.friend !== null ? this.ref(this.life.anyone(b.friend)) : null, rival: b.rival !== null ? this.ref(this.life.anyone(b.rival)) : null };
+  }
+
+  private feudsOf(p: Person): PersonInfo['feuds'] {
+    const soc = this.life.society;
+    const mine = soc.houseOf(p);
+    return soc.feuds
+      .filter((f) => f.ended === undefined && (f.a === mine || f.b === mine))
+      .map((f) => ({ with: this.name(f.a === mine ? f.b : f.a) ?? '?', reason: f.reason, since: dateFromMinutes(f.since).year }));
   }
 
   private tribeOf(bandId: number): { name: string; hue: number } | null {

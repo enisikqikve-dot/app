@@ -30,6 +30,7 @@ import { TribeSystem } from './tribes';
 import { CivSystem } from './civ';
 import { PoliticsSystem } from './politics';
 import { FutureSystem } from './future';
+import { SocietySystem } from './society';
 import {
   BIT,
   INVENTION_IDS,
@@ -89,7 +90,7 @@ const FLAG_STARVING = 1;
 const FLAG_PARCHED = 2;
 
 /** Actions that do something for the group when they end. */
-const WORK_ACTIONS = new Set<Person['action']>(['hunt', 'fish', 'build', 'heal', 'teach', 'fire', 'pray', 'farm']);
+const WORK_ACTIONS = new Set<Person['action']>(['hunt', 'fish', 'build', 'heal', 'teach', 'fire', 'pray', 'farm', 'smith', 'trade', 'guard', 'study', 'celebrate', 'mourn']);
 
 /** Lines in the life story that are kept when someone is archived. */
 const MAJOR_LOG = new Set<LogKey>([
@@ -221,6 +222,7 @@ export class Life {
   readonly civ = new CivSystem(this);
   readonly politics = new PoliticsSystem(this);
   readonly future = new FutureSystem(this);
+  readonly society = new SocietySystem(this);
   /** The world during a step (not saved). */
   private stepWorld: World | null = null;
   /** How many talks one talk stands for (time skip). */
@@ -798,6 +800,7 @@ export class Life {
     this.log(p, 'died', { cause });
     this.data.deaths = (this.data.deaths ?? 0) + 1;
     this.civ.onDeath(p);
+    this.society.onDeath(p, cause);
     // The chronicle names everyone while the world is small, later only notable people.
     const notable = wasLeader || age >= 70 || p.log.some((l) => l.key === 'invented') || !['age', 'sickness', 'hunger', 'thirst', 'cold', 'war', 'murder'].includes(cause);
     if (notable || this.population() < SMALL_WORLD) this.chron('death', { a: p.id, n: Math.floor(age), s: cause, ...(wasLeader ? { major: 1 as const } : {}) });
@@ -1118,6 +1121,8 @@ export class Life {
     }
     // Believers in distress pray.
     if (age >= 10 && this.faith.wantsToPray(p, world)) return this.start(p, 'pray', t, 60);
+    // Weddings, feasts and funerals bring the group together.
+    if (age >= 3 && p.thirst < 0.6 && p.hunger < 0.6 && this.society.attend(p, world)) return;
     // Work for the group by day (not when thirsty or hungry: work takes people away from water).
     if (age >= 13 && p.task && p.task !== 'gather' && p.thirst < 0.35 && p.hunger < 0.45 && this.isDay(world, p.cell, t) && this.doTask(p, world, t, leader)) return;
     // A village is home: the leader stays there (the others stay near the leader).
@@ -1337,6 +1342,7 @@ export class Life {
     }
     // Coming of age: children take on some of their parents' views of others, and what they know.
     if (age >= 13 && age - 1 / DAYS_PER_YEAR < 13) {
+      this.society.comeOfAge(p);
       this.inheritOpinions(p);
       this.learnFromParents(p);
     }
@@ -1347,6 +1353,7 @@ export class Life {
     this.faith.personDaily(p, age);
     this.tribes.personDaily(p, world, age);
     this.civ.personDaily(p, age);
+    this.society.personDaily(p, age);
 
     if (p.sex === 'f' && !p.pregnant && p.partner >= 0) this.tryConceive(p, world, t, age);
     if (p.partner < 0 && age >= 17 && age <= 35 && !this.isLeader(p) && this.rng.chance(0.012)) this.seekPartner(p, world);
@@ -1626,6 +1633,7 @@ export class Life {
       this.addMood(x, 'partner', 20, 20, y.id);
     }
     this.tribes.onCouple(a, b);
+    this.society.onCouple(a, b);
     const [f, m] = a.sex === 'f' ? [a, b] : [b, a];
     this.chron('couple', { a: f.id, b: m.id });
   }
@@ -1715,7 +1723,8 @@ export class Life {
         (mood < 35 ? 0.08 : 0) +
         (opPQ < -20 ? 0.12 : 0) +
         (opPQ < -50 ? 0.1 : 0) +
-        (p.feel?.kind === 'anger' ? 0.35 : 0) -
+        (p.feel?.kind === 'anger' ? 0.35 : 0) +
+        this.society.quarrelBonus(p, q) -
         kindP / 600 -
         (lucky ? 0.03 : 0);
       if (this.rng.chance(quarrel)) kind = 'quarrel';
@@ -1779,6 +1788,7 @@ export class Life {
           this.log(q, 'fight', { other: p.id });
           this.addOp(q, p.id, -15);
           this.tribes.onFight(p, q);
+          this.society.wrong(p, q, 'fight');
           if (this.stepWorld) this.tribes.maybeMurder(p, q, this.stepWorld);
         }
         break;
@@ -1805,6 +1815,7 @@ export class Life {
         p.traits[T_BRAVE] * 0.15 +
         p.traits[T_CLEVER] * 0.1 +
         (p.lead !== undefined && p.lead > this.data.t ? 200 : 0) +
+        (p.dream === 'lead' ? 15 : 0) +
         hashUnit(p.id, 99) * 4;
       if (score > bestScore) {
         bestScore = score;
@@ -1819,6 +1830,7 @@ export class Life {
       this.log(chosen, 'leader');
       this.chron('leader', { a: chosen.id });
     }
+    if (chosen) this.society.achieve(chosen, 'lead');
   }
 
   private dailyWorld(world: World, t: number): void {
@@ -1863,7 +1875,7 @@ export class Life {
         for (const p of list) {
           const age = this.ageOf(p);
           if (p.id === band.leader || p.partner < 0 || age < 17 || age > 40) continue;
-          const s = p.traits[T_BRAVE] + p.traits[T_CURIOUS] + this.rng.next() * 30;
+          const s = p.traits[T_BRAVE] + p.traits[T_CURIOUS] + this.rng.next() * 30 + (p.dream === 'explore' ? 40 : 0);
           if (s > moverScore) {
             moverScore = s;
             mover = p;
@@ -1886,6 +1898,7 @@ export class Life {
     this.tribes.daily(world, t);
     this.civ.daily(world, t);
     this.politics.daily();
+    this.society.daily(t);
     if (Math.floor(t / DAY) % DAYS_PER_YEAR === 13) this.politics.yearly();
   }
 
@@ -2047,6 +2060,7 @@ export class Life {
     this.log(p, 'invented', { n: INVENTION_IDS.indexOf(id) });
     this.addMood(p, 'invented', 15, 30);
     this.chron('invention', { a: p.id, s: id, ...(again ? { n: 1 } : {}), major: 1 });
+    this.society.achieve(p, 'invent');
   }
 
   // ------------------------------------------------------------ work
@@ -2070,7 +2084,24 @@ export class Life {
     if (know && (teacher || this.someoneToTeach(p))) scores.push(['teach', (teacher ? 4 : 0.7) * (0.4 + tr[T_KIND] / 100 + tr[T_CLEVER] / 200)]);
     if (tr[T_CURIOUS] > 55) scores.push(['tinker', (tr[T_CURIOUS] / 100) * 0.8]);
     if (p.shaman) scores.push(['rite', 1.3]);
-    if (band?.home !== undefined && this.civ.bandKnows(p.band, 'farming')) scores.push(['farm', 2.2 * (0.5 + tr[T_DILIGENT] / 100) * fit]);
+    // Farming matters most while the store is low; with enough food, other trades take over.
+    if (band?.home !== undefined && this.civ.bandKnows(p.band, 'farming')) scores.push(['farm', (band.food < stats.size * 1.5 ? 2.2 : 1.1) * (0.5 + tr[T_DILIGENT] / 100) * fit]);
+    // Trades of towns: smiths, traders, guards and scholars.
+    if (band?.home !== undefined) {
+      const tribe = this.tribes.tribeOfBand(p.band);
+      const civ = this.civ;
+      const war = !!tribe && this.tribes.wars.some((w) => w.end === undefined && (w.a === tribe.id || w.b === tribe.id));
+      const dream = (d: string, f: number) => (p.dream === d ? f : 1);
+      if (civ.knows(tribe, 'bronze')) scores.push(['smith', 0.9 * (0.5 + tr[T_DILIGENT] / 100) * fit]);
+      if (civ.knows(tribe, 'money')) scores.push(['trade', 0.8 * (0.4 + tr[T_AMBITIOUS] / 100 + tr[T_KIND] / 200) * dream('wealth', 1.6)]);
+      if (civ.knows(tribe, 'bronze') && (war || (tribe?.culture[0] ?? 0) > 60)) scores.push(['guard', (war ? 1.4 : 0.45) * (0.5 + tr[T_BRAVE] / 100) * fit * dream('glory', 1.6)]);
+      if (civ.knows(tribe, 'writing')) scores.push(['study', 0.7 * (0.4 + tr[T_CLEVER] / 100 + tr[T_CURIOUS] / 200) * dream('invent', 1.5)]);
+    }
+    for (const s of scores) {
+      if (s[0] === 'tinker' && p.dream === 'invent') s[1] *= 2;
+      if (s[0] === 'build' && p.dream === 'build') s[1] *= 1.5;
+      if (s[0] === 'hunt' && p.dream === 'glory') s[1] *= 1.3;
+    }
     if (group & BIT.fire && !this.members(p.band).some((q) => q !== p && q.alive && q.band === p.band && q.task === 'fire')) {
       scores.push(['fire', age > 55 ? 1.5 : 0.7]);
     }
@@ -2163,6 +2194,16 @@ export class Life {
       case 'tinker':
         this.start(p, 'tinker', t, 180, true);
         return true;
+      case 'smith':
+      case 'trade':
+      case 'guard':
+      case 'study': {
+        const home = this.civ.homeOf(p.band);
+        if (!home) return false;
+        if (!world.within(p.cell, home.cell, world.kmPerCell * 1.2)) return this.goTo(p, world, (c) => c === home.cell, 12, 'work');
+        this.start(p, p.task, t, p.task === 'guard' ? 240 : 180, true);
+        return true;
+      }
       case 'farm': {
         const home = this.civ.homeOf(p.band);
         if (!home) return false;
@@ -2213,8 +2254,10 @@ export class Life {
         let hut = this.data.structures.find((s) => s.kind === 'hut' && s.band === p.band && s.cell === camp && s.built < 1);
         if (!hut && this.hutsWanted(p.band, camp) > 0) hut = this.addStructure('hut', camp, p.band, 0);
         if (hut) {
+          const before = hut.built;
           hut.built = Math.min(1, hut.built + 0.35 * (0.6 + p.traits[T_DILIGENT] / 100));
           hut.used = t;
+          if (before < 1 && hut.built >= 1) p.built = (p.built ?? 0) + 1;
         }
         return;
       }
@@ -2240,6 +2283,21 @@ export class Life {
         band.food += crop * (0.8 + p.traits[T_DILIGENT] / 125) * k('herding', 1.25) * k('wheel', 1.15);
         return;
       }
+      case 'celebrate':
+      case 'mourn':
+        this.society.finish(p, p.action);
+        return;
+      case 'smith':
+        if (band) band.food += 0.4;
+        if (p.wealth !== undefined) p.wealth += 0.8;
+        return;
+      case 'trade':
+        if (band) band.food += 0.3;
+        if (p.wealth !== undefined) p.wealth += 1.2;
+        return;
+      case 'guard':
+      case 'study':
+        return;
       case 'pray':
         if (p.shaman) this.faith.rite(p);
         else this.log(p, 'prayed');
@@ -2345,6 +2403,8 @@ export class Life {
       know: p.know,
       ...((p.belief ?? -1) >= 0 ? { belief: p.belief } : {}),
       ...(p.shaman ? { shaman: true } : {}),
+      ...(p.dream ? { dream: p.dream } : {}),
+      ...(p.dreamDone ? { dreamDone: true } : {}),
     };
   }
 
@@ -2382,6 +2442,7 @@ export class Life {
       q.actionUntil = t;
     }
     p.dest = dest;
+    this.society.achieve(p, 'explore');
     this.log(p, 'emigrated', { n: movers.length - 1 });
     if (partner && movers.includes(partner)) this.log(partner, 'emigrated', { n: movers.length - 1 });
     this.chron('emigrate', { a: p.id, n: movers.length, major: 1 });
@@ -3134,6 +3195,7 @@ export class Life {
         if (p.feel?.kind === 'anger') p.feel = undefined;
         this.addMood(p, 'forgive', 8, 20);
         this.log(p, 'forgave');
+        this.society.forgive(p);
         return 'accepted';
       case 'wComfort':
         if (!take(0.95)) return 'resisted';
@@ -3145,7 +3207,7 @@ export class Life {
         this.log(p, 'comforted');
         return 'accepted';
       case 'wEmigrate': {
-        const chance = 0.35 + tr[T_CURIOUS] / 250 + tr[T_BRAVE] / 250 + (p.feel?.kind === 'courage' ? 0.2 : 0);
+        const chance = 0.35 + tr[T_CURIOUS] / 250 + tr[T_BRAVE] / 250 + (p.feel?.kind === 'courage' ? 0.2 : 0) + (p.dream === 'explore' ? 0.2 : 0);
         if (!take(chance)) return 'resisted';
         return this.emigrate(p, world, t) ? 'accepted' : 'noPlace';
       }

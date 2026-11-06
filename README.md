@@ -8,7 +8,20 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Alle Meilensteine fertig ✅ (Meilenstein 11 – Feinschliff)
+## Stand: Meilenstein 12 – Lebendigere Menschen ✅
+
+**Neu: Die Menschen haben Arme, Beine und Gesichter, einen Beruf, einen Lebenstraum und Freunde und Feinde.**
+
+- **Figuren mit mehr Details:** Beine, Rumpf, Arme mit Händen, Kopf mit Augen und Mund, kurze oder lange Haare, Bärte. Dazu Hut und Werkzeug ihres Berufs.
+  - Sie bewegen sich: beim Gehen schwingen Arme und Beine, Schmiede hämmern, Bauern hacken, Sammler bücken sich, Gläubige heben die Arme, beim Fest wird getanzt, bei Begräbnissen senken sie die Köpfe.
+- **Berufe, die man sieht:** Sammlerin, Jäger (Speer), Fischer (Angel), Bäuerin (Strohhut und Hacke), Baumeister und Schmied (Hammer), Heilerin und Ärztin (Tasche), Lehrer und Gelehrte (Buch), Feuerhüter (Fackel), Schamanin (Federband), Priester (Mitra), Händlerin, Krieger (Helm und Speer), Anführer, Herrscherin (Krone), Arbeiter, Ingenieurin, Älteste.
+  - Neue Arbeiten in Städten: **Schmieden** (ab Bronze), **Handel** (mit Geld), **Wache** (in Kriegszeiten; macht im Kampf stärker), **Forschen** (mit Schrift; neues Wissen kommt schneller).
+- **Hochzeiten, Feste und Begräbnisse:** Neue Paare feiern mit der Gruppe, jeden Herbst gibt es ein Erntefest, und wer Bestattung kennt oder glaubt, nimmt am Grab Abschied. Das hebt die Stimmung und lindert die Trauer.
+- **Lebensträume:** Mit 15 findet jeder einen Traum: neue Länder entdecken, anführen, erfinden, eine große Familie, reich werden, den Göttern nahe sein, Ruhm im Kampf oder Häuser bauen. Der Traum lenkt, was jemand tut. Erfüllt er sich, ist die Freude groß, wer alt wird, ohne ihn erfüllt zu haben, trauert ihm nach.
+- **Freunde, Rivalen und Familienfehden:** Die Akte zeigt die beste Freundschaft und die Rivalität. Mord, Schlägereien und Diebstahl können eine Fehde zwischen zwei Familien auslösen, die sich über Generationen vererbt. Eine Hochzeit zwischen den Familien, geflüsterte Vergebung oder die Zeit beenden sie.
+- **Behoben:** Die Giebeldächer der Häuser standen auf dem Kopf.
+
+### Meilenstein 11 – Feinschliff ✅
 
 **Das Spiel ist komplett: von 6 Menschen in der Steinzeit bis zu schwebenden Städten und Zeitmaschinen.**
 
