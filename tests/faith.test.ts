@@ -44,7 +44,7 @@ describe('faith', () => {
     const snap = a.life.snapshotJson();
     a.life.advanceTo(8 * YEAR, a.world);
     const bWorld = new World(generatePlanet(1234, 'small'));
-    const b = Life.restore(snap, { archive: a.life.archive, chronicle: a.life.chronicle });
+    const b = Life.restore(snap, { archive: a.life.archive, chronicle: a.life.chronicle, history: a.life.civ.history });
     b.advanceTo(8 * YEAR, bWorld);
     expect(b.serialize()).toEqual(a.life.serialize());
   });

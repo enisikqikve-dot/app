@@ -5,7 +5,7 @@
 
 export type Sex = 'f' | 'm';
 
-export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried' | 'eat' | 'hunt' | 'fish' | 'build' | 'heal' | 'teach' | 'tinker' | 'fire' | 'pray';
+export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried' | 'eat' | 'hunt' | 'fish' | 'build' | 'heal' | 'teach' | 'tinker' | 'fire' | 'pray' | 'farm';
 
 /** Why a person is walking somewhere. */
 export type Goal = 'water' | 'food' | 'group' | 'family' | 'wander' | 'safety' | 'hunt' | 'work' | 'none';
@@ -90,7 +90,12 @@ export type LogKey =
   | 'traded'
   | 'chief'
   | 'battle'
-  | 'newPeople';
+  | 'newPeople'
+  | 'civInvented'
+  | 'settled'
+  | 'ruler'
+  | 'elected'
+  | 'inherited';
 
 export interface LogEntry {
   t: number;
@@ -129,7 +134,9 @@ export type MoodKey =
   | 'war'
   | 'victory'
   | 'defeat'
-  | 'robbed';
+  | 'robbed'
+  | 'rich'
+  | 'poor';
 
 export interface Moodlet {
   key: MoodKey;
@@ -221,6 +228,8 @@ export interface Person {
   shaman?: boolean;
   /** Crimes others found out about (theft 1, murder 3). */
   crimes?: number;
+  /** Money and goods (once there is money). */
+  wealth?: number;
 
   /** Cell the person is in (or leaving). */
   cell: number;
@@ -300,7 +309,38 @@ export interface Band {
   hadShaman?: boolean;
   /** The people (Volk) the group belongs to. */
   tribe?: number;
+  /** The village or town the group lives in. */
+  home?: number;
 }
+
+/** A village, town or city. Most inhabitants are counted, a few are people you can follow. */
+export interface Settlement {
+  id: number;
+  name: string;
+  cell: number;
+  tribe: number;
+  /** The group of people you can see and follow there. */
+  band: number;
+  founded: number;
+  /** Inhabitants besides the people you can follow (counted, not simulated one by one). */
+  crowd: number;
+  /** Farmland around it. */
+  fields: number;
+  /** Price of food on the market (100 = normal). */
+  price: number;
+  /** Largest size it reached: 0 village, 1 town, 2 city, 3 metropolis. */
+  grew: number;
+  /** Things built with taxes: a temple and a wall. */
+  temple?: boolean;
+  wall?: boolean;
+  /** Blessed harvest until then. */
+  blessed?: number;
+  ended?: number;
+}
+
+export type GovForm = 'band' | 'elders' | 'monarchy' | 'theocracy' | 'republic' | 'democracy' | 'dictatorship';
+export const GOV_FORMS: GovForm[] = ['band', 'elders', 'monarchy', 'theocracy', 'republic', 'democracy', 'dictatorship'];
+export type LawId = 'theft' | 'murder' | 'tax' | 'faith' | 'peace' | 'equality' | 'market';
 
 /** A people: groups that share an origin, a name and a culture. */
 export interface Tribe {
@@ -323,6 +363,21 @@ export interface Tribe {
   /** A murder or defeat it wants to avenge: [tribe, until]. */
   grudge?: [number, number];
   ended?: number;
+  /** What the people knows as a civilisation (bit mask, see civtech.ts). */
+  tech?: number;
+  /** Stone-age knowledge written down (with writing it is never lost). */
+  lore?: number;
+  /** How it is governed, since when, and its laws. */
+  gov?: GovForm;
+  govSince?: number;
+  laws?: LawId[];
+  /** The ruling family (monarchy): the founder of the dynasty. */
+  dynasty?: number;
+  nextElection?: number;
+  /** Taxes collected. */
+  treasury?: number;
+  /** Discontent 0 … 1. */
+  unrest?: number;
 }
 
 export type WarReason = 'land' | 'revenge' | 'faith' | 'hunger' | 'ambition';
@@ -416,7 +471,17 @@ export type ChronicleKey =
   | 'war'
   | 'battle'
   | 'peace'
-  | 'conquered';
+  | 'conquered'
+  | 'civTech'
+  | 'settled'
+  | 'grew'
+  | 'colony'
+  | 'abandoned'
+  | 'government'
+  | 'ruler'
+  | 'election'
+  | 'revolt'
+  | 'law';
 
 /** One line in the world chronicle. */
 export interface ChronicleEntry {
@@ -506,6 +571,11 @@ export interface LifeData {
   /** All peoples that ever lived, and their wars. */
   tribes?: Tribe[];
   wars?: War[];
+  /** Villages, towns and cities. */
+  settlements?: Settlement[];
+  /** Append-only: one row of numbers per year (see HISTORY_FIELDS). */
+  history?: number[][];
+  historyCount?: number;
   /** Your deeds as people see them: [kind, cruel]. */
   deeds?: [number, number];
 }

@@ -75,7 +75,7 @@ describe('time skip', () => {
     c.life.advanceTo(c.life.t + 9 * YEAR, c.world);
     const mid = c.life.snapshotJson();
     c.life.advanceTo(c.life.t + 21 * YEAR, c.world);
-    const d = Life.restore(mid, { archive: c.life.archive, chronicle: c.life.chronicle });
+    const d = Life.restore(mid, { archive: c.life.archive, chronicle: c.life.chronicle, history: c.life.civ.history });
     d.advanceTo(c.life.t, c.world);
     expect(d.serialize()).toEqual(c.life.serialize());
   });

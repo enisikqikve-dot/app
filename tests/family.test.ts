@@ -79,7 +79,7 @@ describe('life and love', () => {
     a.life.advanceTo(24 * YEAR, a.world);
 
     const b = setup(1234);
-    const resumed = Life.restore(snap, { archive: a.life.archive, chronicle: a.life.chronicle });
+    const resumed = Life.restore(snap, { archive: a.life.archive, chronicle: a.life.chronicle, history: a.life.civ.history });
     resumed.advanceTo(24 * YEAR, b.world);
     expect(resumed.serialize()).toEqual(a.life.serialize());
   });

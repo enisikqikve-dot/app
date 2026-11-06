@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { formatNumber, t, type MessageKey } from '../i18n';
-import type { ChronicleCategory, ChronicleLine, FaithInfo, KnowledgeInfo, PeoplesInfo, SpeciesInfo, TribeInfo } from '../game/peopleInfo';
+import type { Epoch } from '../game/Game';
+import type { ChronicleCategory, ChronicleLine, CivTechInfo, FaithInfo, KnowledgeInfo, PeoplesInfo, SpeciesInfo, TribeInfo } from '../game/peopleInfo';
 import { chronicleText } from './chronicleText';
-import { deityName, geneWords, inventionName, speciesName } from './names';
+import { civName, deityName, geneWords, inventionName, rulerTitle, speciesName } from './names';
 import { biomeName } from './format';
 import { IconClose } from './icons';
 
-const FILTERS: (ChronicleCategory | 'all')[] = ['all', 'people', 'love', 'death', 'groups', 'conflict', 'knowledge', 'faith', 'animals', 'nature'];
+const FILTERS: (ChronicleCategory | 'all')[] = ['all', 'people', 'love', 'death', 'groups', 'conflict', 'civ', 'knowledge', 'faith', 'animals', 'nature'];
 type Tab = 'chronicle' | 'knowledge' | 'faith' | 'peoples' | 'animals';
 
 interface Props {
@@ -15,8 +16,9 @@ interface Props {
   species: SpeciesInfo[];
   faith: FaithInfo;
   peoples: PeoplesInfo;
+  civTech: CivTechInfo[];
   planet: string;
-  epoch: 'none' | 'paleolithic' | 'mesolithic';
+  epoch: Epoch;
   onPerson: (id: number) => void;
   onPlace: (cell: number) => void;
   onClose: () => void;
@@ -35,7 +37,7 @@ function ChronicleList({ lines, planet, epoch, onPerson }: { lines: ChronicleLin
           </button>
         ))}
       </div>
-      <p class="chron-chapter">{t(epoch === 'mesolithic' ? 'chron.chapter.mesolithic' : 'chron.chapter.paleolithic')}</p>
+      <p class="chron-chapter">{t(epoch === 'none' ? 'chron.chapter.paleolithic' : (`chron.chapter.${epoch}` as MessageKey))}</p>
       {shown.length === 0 ? (
         <p class="place-text">{t('chron.empty')}</p>
       ) : (
@@ -63,9 +65,41 @@ function ChronicleList({ lines, planet, epoch, onPerson }: { lines: ChronicleLin
   );
 }
 
-function KnowledgeList({ items }: { items: KnowledgeInfo[] }) {
+function KnowledgeList({ items, civ }: { items: KnowledgeInfo[]; civ: CivTechInfo[] }) {
+  const civKnown = civ.some((c) => c.peoples.length > 0 || c.first);
   return (
     <>
+      {civKnown && (
+        <>
+          <h3 class="list-title">{t('know.civTitle')}</h3>
+          <p class="note">{t('know.civNote')}</p>
+          <ol class="know-list">
+            {civ.map((c) => (
+              <li key={c.id} class={`know ${c.peoples.length ? 'is-known' : c.first ? 'is-lost' : 'is-unknown'}`}>
+                <div class="know-head">
+                  <b>{civName(c.id)}</b>
+                  {c.peoples.length > 0 ? (
+                    <span class="chip chip-gold">{t('know.civPeoples', { n: formatNumber(c.peoples.length) })}</span>
+                  ) : (
+                    <span class={`chip ${c.first ? 'chip-hot' : 'chip-cond'}`}>{t(c.first ? 'know.status.lost' : 'know.status.unknown')}</span>
+                  )}
+                </div>
+                <span class="know-info">{t(`civInfo.${c.id}` as MessageKey)}</span>
+                <span class="know-meta mono">
+                  {[
+                    c.peoples.length ? c.peoples.map((p) => p.name).join(', ') : '',
+                    c.first ? t('know.civFirst', { name: c.first.name, tribe: c.first.tribe, year: formatNumber(c.first.year) }) : '',
+                    !c.peoples.length && c.needs.length ? t('know.needs', { list: c.needs.map((n) => civName(n)).join(', ') }) : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <h3 class="list-title">{t('know.stoneTitle')}</h3>
+        </>
+      )}
       <p class="note">{t('know.note')}</p>
       <ol class="know-list">
         {items.map((k) => (
@@ -162,7 +196,7 @@ function cultureWords(c: TribeInfo['culture']): string {
   return out.join(' · ');
 }
 
-function PeoplesList({ info, onPerson }: { info: PeoplesInfo; onPerson: (id: number) => void }) {
+function PeoplesList({ info, onPerson, onPlace }: { info: PeoplesInfo; onPerson: (id: number) => void; onPlace: (cell: number) => void }) {
   const living = info.tribes.filter((tr) => tr.endedYear === null);
   const gone = info.tribes.filter((tr) => tr.endedYear !== null);
   return (
@@ -176,8 +210,14 @@ function PeoplesList({ info, onPerson }: { info: PeoplesInfo; onPerson: (id: num
               <b>
                 <TribeDot hue={tr.hue} /> {t('peoples.name', { name: tr.name })}
               </b>
-              <span class="chip chip-cond">{t('peoples.size', { n: formatNumber(tr.population), g: formatNumber(tr.groups) })}</span>
+              <span class="chip chip-cond">
+                {tr.settlements.length ? t(tr.settlements.length === 1 ? 'peoples.sizeTown' : 'peoples.sizeTowns', { n: formatNumber(tr.total), s: formatNumber(tr.settlements.length) }) : t('peoples.size', { n: formatNumber(tr.population), g: formatNumber(tr.groups) })}
+              </span>
             </div>
+            <span class="know-info">
+              <b>{t(`gov.${tr.gov}` as MessageKey)}</b>
+              {tr.unrest > 0.45 ? ` · ${t('peoples.unrest')}` : ''}
+            </span>
             <span class="know-info">
               {cultureWords(tr.culture)}
               {tr.religion ? ` · ${t('person.believes', { deity: deityName(tr.religion, true) })}` : ''}
@@ -186,13 +226,23 @@ function PeoplesList({ info, onPerson }: { info: PeoplesInfo; onPerson: (id: num
               {tr.chief && (
                 <>
                   <button type="button" class="link-btn" onClick={() => onPerson(tr.chiefId)}>
-                    {t('peoples.chief', { name: tr.chief })}
+                    {rulerTitle(tr.gov, tr.rulerSex)}: {tr.chief}
                   </button>
                   {' · '}
                 </>
               )}
               {t(`peoples.origin.${tr.origin}` as MessageKey, { year: formatNumber(tr.foundedYear), parent: tr.parent ?? '?' })}
             </span>
+            {tr.laws.length > 0 && <span class="know-meta">{t('peoples.laws', { list: tr.laws.map((l) => t(`lawShort.${l}` as MessageKey)).join(' · ') })}</span>}
+            {tr.settlements.length > 0 && (
+              <div class="chips tribe-rels">
+                {tr.settlements.slice(0, 12).map((h) => (
+                  <button key={h.id} type="button" class="chip town-chip" onClick={() => onPlace(h.cell)}>
+                    {t(`town.size.${h.size}` as MessageKey)} {h.name} · {formatNumber(h.people)}
+                  </button>
+                ))}
+              </div>
+            )}
             {tr.relations.length > 0 && (
               <div class="chips tribe-rels">
                 {tr.relations.map((r) => (
@@ -283,7 +333,7 @@ function SpeciesList({ items }: { items: SpeciesInfo[] }) {
 }
 
 /** The world chronicle (a history book that writes itself), the knowledge net and the animal species. */
-export function ChroniclePanel({ lines, knowledge, species, faith, peoples, planet, epoch, onPerson, onPlace, onClose }: Props) {
+export function ChroniclePanel({ lines, knowledge, species, faith, peoples, civTech, planet, epoch, onPerson, onPlace, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('chronicle');
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -308,9 +358,9 @@ export function ChroniclePanel({ lines, knowledge, species, faith, peoples, plan
       </div>
       <div class="chron-body">
         {tab === 'chronicle' && <ChronicleList lines={lines} planet={planet} epoch={epoch} onPerson={onPerson} />}
-        {tab === 'knowledge' && <KnowledgeList items={knowledge} />}
+        {tab === 'knowledge' && <KnowledgeList items={knowledge} civ={civTech} />}
         {tab === 'faith' && <FaithList info={faith} onPerson={onPerson} onPlace={onPlace} />}
-        {tab === 'peoples' && <PeoplesList info={peoples} onPerson={onPerson} />}
+        {tab === 'peoples' && <PeoplesList info={peoples} onPerson={onPerson} onPlace={onPlace} />}
         {tab === 'animals' && <SpeciesList items={species} />}
       </div>
     </section>

@@ -1,6 +1,6 @@
 import { t, type MessageKey } from '../i18n';
 import type { ChronicleLine } from '../game/peopleInfo';
-import { deityName, inventionName, speciesName } from './names';
+import { civName, deityName, inventionName, rulerTitle, speciesName } from './names';
 
 /** One line of the world chronicle, written like a history book. */
 export function chronicleText(l: ChronicleLine, planet: string): string {
@@ -79,7 +79,35 @@ export function chronicleText(l: ChronicleLine, planet: string): string {
       return l.winner ? `${base} ${t('chron.peaceWinner', { winner: l.winner })}` : base;
     }
     case 'conquered':
-      return t('chron.conquered', { a, tribe: l.tribe ?? '?' });
+      return l.place ? t('chron.conqueredTown', { place: l.place, tribe: l.tribe ?? '?' }) : t('chron.conquered', { a, tribe: l.tribe ?? '?' });
+    case 'civTech':
+      return l.other
+        ? t('chron.civTechFrom', { tribe: l.tribe ?? '?', other: l.other, tech: civName(l.s ?? '') })
+        : l.a
+          ? t('chron.civTech', { a, tribe: l.tribe ?? '?', tech: civName(l.s ?? '') })
+          : t('chron.civTechPeople', { tribe: l.tribe ?? '?', tech: civName(l.s ?? '') });
+    case 'settled':
+      return t('chron.settled', { a, place: l.place ?? '?', tribe: l.tribe ?? '?' });
+    case 'colony':
+      return t('chron.colony', { place: l.place ?? '?', from: l.from ?? '?' });
+    case 'grew':
+      return t(`chron.grew.${l.s ?? '1'}` as MessageKey, { place: l.place ?? '?' });
+    case 'abandoned':
+      return t('chron.abandoned', { place: l.place ?? '?' });
+    case 'government': {
+      const [form, why] = (l.s ?? 'band:').split(':');
+      return t(`chron.gov.${why}` as MessageKey, { a, tribe: l.tribe ?? '?', form: t(`gov.${form}` as MessageKey) });
+    }
+    case 'ruler': {
+      const [form, how] = (l.s ?? 'band:chosen').split(':');
+      return t(`chron.ruler.${how}` as MessageKey, { a, tribe: l.tribe ?? '?', title: rulerTitle(form, l.sex ?? 'm') });
+    }
+    case 'election':
+      return t('chron.election', { a, tribe: l.tribe ?? '?', n });
+    case 'revolt':
+      return t('chron.revolt', { a, tribe: l.tribe ?? '?' });
+    case 'law':
+      return t('chron.law', { tribe: l.tribe ?? '?', law: t(`law.${l.s ?? 'theft'}` as MessageKey) });
     case 'speciesGone':
       return t('chron.speciesGone', { species: l.species ? speciesName(l.species.base, l.species.prefix) : '?' });
     default:

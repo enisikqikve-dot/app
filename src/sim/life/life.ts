@@ -27,6 +27,8 @@ import { childLook, childTraits, founderLook, hashUnit, randomTraits, type Rando
 import { FLAG_FREEZING, moodReasons, moodValue, type MoodReason } from './mood';
 import { FaithSystem } from './faith';
 import { TribeSystem } from './tribes';
+import { CivSystem } from './civ';
+import { PoliticsSystem } from './politics';
 import {
   BIT,
   INVENTION_IDS,
@@ -86,7 +88,7 @@ const FLAG_STARVING = 1;
 const FLAG_PARCHED = 2;
 
 /** Actions that do something for the group when they end. */
-const WORK_ACTIONS = new Set<Person['action']>(['hunt', 'fish', 'build', 'heal', 'teach', 'fire', 'pray']);
+const WORK_ACTIONS = new Set<Person['action']>(['hunt', 'fish', 'build', 'heal', 'teach', 'fire', 'pray', 'farm']);
 
 /** Lines in the life story that are kept when someone is archived. */
 const MAJOR_LOG = new Set<LogKey>([
@@ -130,7 +132,7 @@ const CHRONICLED: ReadonlySet<PowerKind> = new Set<PowerKind>([
   'spawnAnimals',
 ]);
 
-const POPULATION_MARKS = [10, 25, 50, 100, 200];
+const POPULATION_MARKS = [10, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 1000000, 10000000, 100000000, 1000000000];
 /** Below this population every birth and death goes into the chronicle. */
 const SMALL_WORLD = 40;
 const MAX_STRUCTURES = 220;
@@ -215,6 +217,8 @@ export class Life {
   /** Belief and religion (state lives in the data). */
   readonly faith = new FaithSystem(this);
   readonly tribes = new TribeSystem(this);
+  readonly civ = new CivSystem(this);
+  readonly politics = new PoliticsSystem(this);
   /** The world during a step (not saved). */
   private stepWorld: World | null = null;
   /** How many talks one talk stands for (time skip). */
@@ -285,7 +289,7 @@ export class Life {
    * A living world from saved data. Snapshots leave out the append-only lists
    * (archive, chronicle); `ledgers` supplies them, usually from the current world.
    */
-  static restore(data: LifeData | string, ledgers?: { archive: readonly ArchivedPerson[]; chronicle: readonly ChronicleEntry[] }): Life {
+  static restore(data: LifeData | string, ledgers?: { archive: readonly ArchivedPerson[]; chronicle: readonly ChronicleEntry[]; history?: readonly number[][] }): Life {
     const raw = (typeof data === 'string' ? JSON.parse(data) : JSON.parse(JSON.stringify(data))) as LifeData;
     const d = Life.upgrade(raw);
     if (d.archiveCount !== undefined) {
@@ -295,6 +299,10 @@ export class Life {
     if (d.chronicleCount !== undefined) {
       d.chronicle = (ledgers?.chronicle ?? d.chronicle).slice(0, d.chronicleCount);
       delete d.chronicleCount;
+    }
+    if (d.historyCount !== undefined) {
+      d.history = (ledgers?.history ?? d.history ?? []).slice(0, d.historyCount);
+      delete d.historyCount;
     }
     return new Life(d);
   }
@@ -365,9 +373,10 @@ export class Life {
   snapshotJson(): string {
     this.sync();
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(this.data)) out[k] = k === 'archive' || k === 'chronicle' ? [] : v;
+    for (const [k, v] of Object.entries(this.data)) out[k] = k === 'archive' || k === 'chronicle' || k === 'history' ? [] : v;
     out.archiveCount = this.data.archive.length;
     out.chronicleCount = this.data.chronicle.length;
+    out.historyCount = this.data.history?.length ?? 0;
     return JSON.stringify(out);
   }
 
@@ -471,6 +480,7 @@ export class Life {
       song: (this.bandKnows(p.band) & BIT.song) !== 0,
       hut: this.hutAt(p.cell, p.band),
       believer: (p.belief ?? -1) >= 0 && (p.faith ?? 0) >= 0.45,
+      standing: this.civ.standing(p),
     });
     return { value: moodValue(reasons), reasons };
   }
@@ -685,6 +695,38 @@ export class Life {
     return p;
   }
 
+  /** A new group (of a people, maybe living in a village). @internal */
+  createBand(leader: number, tribe?: number, home?: number): Band {
+    const band = this.newBand(leader);
+    if (tribe !== undefined) band.tribe = tribe;
+    if (home !== undefined) band.home = home;
+    return band;
+  }
+
+  /** A group nobody joined after all. @internal */
+  dropBand(band: Band): void {
+    this.data.bands = this.data.bands.filter((b) => b !== band);
+    this.bandById.delete(band.id);
+  }
+
+  /** Someone from a counted crowd who becomes a person you can follow. @internal */
+  addAdult(world: World, cell: number, band: number): Person | null {
+    const tribe = this.tribes.tribeOfBand(band);
+    const p = this.addPerson(world, cell, this.rng, { band, age: [16, 32], know: tribe?.lore ?? this.bandKnows(band) });
+    if (p) this.invalidateKnowledge();
+    return p;
+  }
+
+  /** @internal */
+  chooseLeader(band: Band): void {
+    this.electLeader(band, false);
+  }
+
+  /** Everyone, including the counted inhabitants of villages and towns. */
+  totalPopulation(): number {
+    return this.civ.totalPopulation();
+  }
+
   private newBand(leader: number): Band {
     const band: Band = { id: this.data.nextId++, leader, founded: this.data.t, food: 0 };
     this.data.bands.push(band);
@@ -741,6 +783,7 @@ export class Life {
     p.dest = undefined;
     this.log(p, 'died', { cause });
     this.data.deaths = (this.data.deaths ?? 0) + 1;
+    this.civ.onDeath(p);
     // The chronicle names everyone while the world is small, later only notable people.
     const notable = wasLeader || age >= 70 || p.log.some((l) => l.key === 'invented') || !['age', 'sickness', 'hunger', 'thirst', 'cold', 'war', 'murder'].includes(cause);
     if (notable || this.population() < SMALL_WORLD) this.chron('death', { a: p.id, n: Math.floor(age), s: cause, ...(wasLeader ? { major: 1 as const } : {}) });
@@ -1046,6 +1089,12 @@ export class Life {
     if (age >= 10 && this.faith.wantsToPray(p, world)) return this.start(p, 'pray', t, 60);
     // Work for the group by day (not when thirsty or hungry: work takes people away from water).
     if (age >= 13 && p.task && p.task !== 'gather' && p.thirst < 0.35 && p.hunger < 0.45 && this.isDay(world, p.cell, t) && this.doTask(p, world, t, leader)) return;
+    // A village is home: the leader stays there (the others stay near the leader).
+    const home = this.civ.homeOf(p.band);
+    if (home && !leader && p.dest === undefined) {
+      if (!world.within(p.cell, home.cell, world.kmPerCell * 1.2) && this.goTo(p, world, (c) => c === home.cell, 20, 'group')) return;
+      return this.start(p, 'rest', t, this.rng.range(60, 200), true);
+    }
     // Leaders sometimes move on to a better place (always, when food runs short). With huts, they stay.
     const settled = this.hutAt(p.cell, p.band);
     const band = this.bandById.get(p.band);
@@ -1266,6 +1315,7 @@ export class Life {
     }
     this.faith.personDaily(p, age);
     this.tribes.personDaily(p, world, age);
+    this.civ.personDaily(p, age);
 
     if (p.sex === 'f' && !p.pregnant && p.partner >= 0) this.tryConceive(p, world, t, age);
     if (p.partner < 0 && age >= 17 && age <= 35 && !this.isLeader(p) && this.rng.chance(0.012)) this.seekPartner(p, world);
@@ -1310,7 +1360,9 @@ export class Life {
     // Small groups have more children (and are not easily wiped out), crowded ones fewer.
     const size = this.bandSize(p.band);
     const group = size < 12 ? 1.5 : clamp(1.25 - size / 40, 0.15, 1);
-    const world$ = clamp(1.2 - this.population() / 150, 0.06, 1);
+    // In villages the group stays the same size; the counted crowd grows instead.
+    if (this.civ.bandFull(p.band)) return;
+    const world$ = this.bandById.get(p.band)?.home !== undefined ? 1 : clamp(1.2 - this.population() / 150, 0.06, 1);
     const mood = this.mood(p).value;
     const spirit = mood > 65 ? 1.15 : mood < 30 ? 0.7 : 1;
     const chance = 0.016 * fertility * fed * group * world$ * spirit * (p.luck !== undefined ? 1.5 : 1);
@@ -1687,7 +1739,8 @@ export class Life {
         this.addOp(q, p.id, -loss * (1.2 - q.traits[T_KIND] / 200));
         this.addMood(p, 'quarrel', -6, 2, q.id);
         this.addMood(q, 'quarrel', -8, 2, p.id);
-        if (p.traits[T_AGGRESSIVE] > 65 && this.opinion(p, q.id) < -50 && this.rng.chance(0.08)) {
+        const peaceLaw = this.politics.hasLaw(this.tribes.tribeOfBand(p.band), 'peace') ? 0.5 : 1;
+        if (p.traits[T_AGGRESSIVE] > 65 && this.opinion(p, q.id) < -50 && this.rng.chance(0.08 * peaceLaw)) {
           // A rare fight: someone gets hurt.
           const loser = this.rng.chance(0.5) ? p : q;
           this.hurt(loser, 0.12, 'fight');
@@ -1789,7 +1842,7 @@ export class Life {
       }
     }
     // Milestones of the population.
-    const pop = this.population();
+    const pop = this.totalPopulation();
     for (const mark of POPULATION_MARKS) {
       if (pop >= mark && this.data.popRecord < mark) {
         this.data.popRecord = mark;
@@ -1800,6 +1853,9 @@ export class Life {
     this.dailySpecies(world, t);
     this.faith.bandsDaily(world, t);
     this.tribes.daily(world, t);
+    this.civ.daily(world, t);
+    this.politics.daily();
+    if (Math.floor(t / DAY) % DAYS_PER_YEAR === 13) this.politics.yearly();
   }
 
   // ------------------------------------------------------------ knowledge
@@ -1865,7 +1921,8 @@ export class Life {
   /** When the last one who knew something dies, the knowledge is lost. */
   private checkLostKnowledge(mask: number): void {
     if (!mask) return;
-    const still = this.worldKnows();
+    let still = this.worldKnows();
+    for (const tr of this.tribes.living()) still |= tr.lore ?? 0;
     for (const id of INVENTION_IDS) {
       if (mask & BIT[id] && !(still & BIT[id])) this.chron('lost', { s: id, major: 1 });
     }
@@ -1982,6 +2039,7 @@ export class Life {
     if (know && (teacher || this.someoneToTeach(p))) scores.push(['teach', (teacher ? 4 : 0.7) * (0.4 + tr[T_KIND] / 100 + tr[T_CLEVER] / 200)]);
     if (tr[T_CURIOUS] > 55) scores.push(['tinker', (tr[T_CURIOUS] / 100) * 0.8]);
     if (p.shaman) scores.push(['rite', 1.3]);
+    if (band?.home !== undefined && this.civ.bandKnows(p.band, 'farming')) scores.push(['farm', 2.2 * (0.5 + tr[T_DILIGENT] / 100) * fit]);
     if (group & BIT.fire && !this.members(p.band).some((q) => q !== p && q.alive && q.band === p.band && q.task === 'fire')) {
       scores.push(['fire', age > 55 ? 1.5 : 0.7]);
     }
@@ -2074,6 +2132,13 @@ export class Life {
       case 'tinker':
         this.start(p, 'tinker', t, 180, true);
         return true;
+      case 'farm': {
+        const home = this.civ.homeOf(p.band);
+        if (!home) return false;
+        if (!world.within(p.cell, home.cell, world.kmPerCell * 1.2)) return this.goTo(p, world, (c) => c === home.cell, 12, 'work');
+        this.start(p, 'farm', t, 240, true);
+        return true;
+      }
       case 'rite': {
         // At the holy place if it is near, otherwise at the camp.
         const rel = p.belief !== undefined && p.belief >= 0 ? this.faith.religion(p.belief) : undefined;
@@ -2134,6 +2199,14 @@ export class Life {
       case 'teach': {
         const pupil = p.aim !== undefined ? this.person(p.aim) : undefined;
         if (pupil?.alive && pupil.cell === p.cell) this.tryTeach(p, pupil, 0.35);
+        return;
+      }
+      case 'farm': {
+        if (!band) return;
+        const season = Math.floor(((t % YEAR) / YEAR) * 4);
+        const crop = season === 3 ? 0.35 : season === 0 ? 0.8 : 1.2;
+        const k = (id: Parameters<CivSystem['bandKnows']>[1], f: number) => (this.civ.bandKnows(p.band, id) ? f : 1);
+        band.food += crop * (0.8 + p.traits[T_DILIGENT] / 125) * k('herding', 1.25) * k('wheel', 1.15);
         return;
       }
       case 'pray':
@@ -2947,6 +3020,7 @@ export class Life {
         break;
     }
     this.faith.witness(e, world);
+    this.civ.onPower(e, world);
     return outcome;
   }
 
@@ -3079,6 +3153,7 @@ export class Life {
           this.log(p, 'leader');
           this.chron('leader', { a: p.id, major: 1 });
         }
+        this.politics.onLeadWhisper(p);
         return 'accepted';
       }
       default:

@@ -124,5 +124,5 @@ export function foresty(biome: number): boolean {
 }
 
 /** Work a person can do for the group. */
-export const TASKS = ['gather', 'hunt', 'fish', 'build', 'heal', 'teach', 'tinker', 'fire', 'rite'] as const;
+export const TASKS = ['gather', 'hunt', 'fish', 'build', 'heal', 'teach', 'tinker', 'fire', 'rite', 'farm'] as const;
 export type Task = (typeof TASKS)[number];

@@ -13,6 +13,7 @@ import { RewindPanel } from './RewindPanel';
 import { PlacePanel } from './PlacePanel';
 import { HerdPanel, PersonPanel } from './LifePanels';
 import { FamilyTreeView } from './FamilyTree';
+import { StatsPanel } from './StatsPanel';
 import { ChroniclePanel } from './ChroniclePanel';
 import { chronicleText } from './chronicleText';
 import { inventionName } from './names';
@@ -48,6 +49,7 @@ export function App({ game }: { game: Game }) {
   const [rewindOpen, setRewindOpen] = useState(false);
   const [treeFor, setTreeFor] = useState<number | null>(null);
   const [chronicleOpen, setChronicleOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [skipOpen, setSkipOpen] = useState(false);
   const [welcome, setWelcome] = useState(() => safeStorage.get(WELCOME_KEY) !== '1');
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
@@ -99,13 +101,14 @@ export function App({ game }: { game: Game }) {
       else if (skipOpen) setSkipOpen(false);
       else if (ui.skipSummary) game.closeSkipSummary();
       else if (chronicleOpen) setChronicleOpen(false);
+      else if (statsOpen) setStatsOpen(false);
       else if (ui.armed) game.arm(null);
       else if (palette) closePalette();
       else game.clearSelection();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen, rewindOpen, palette, ui.armed, treeFor, chronicleOpen, skipOpen, ui.skipSummary]);
+  }, [menuOpen, rewindOpen, palette, ui.armed, treeFor, chronicleOpen, statsOpen, skipOpen, ui.skipSummary]);
 
   const dismissWelcome = () => {
     setWelcome(false);
@@ -145,7 +148,7 @@ export function App({ game }: { game: Game }) {
 
   const ArmedIcon = ui.armed ? POWER_ICONS[ui.armed] : null;
   const options = ui.armed ? POWER_OPTIONS[ui.armed] : undefined;
-  const overlay = treeFor !== null || chronicleOpen || skipOpen || ui.skipSummary !== null || ui.skip !== null;
+  const overlay = treeFor !== null || chronicleOpen || statsOpen || skipOpen || ui.skipSummary !== null || ui.skip !== null;
   const showPanels = !ui.armed && !rewindOpen && !overlay;
   const tree = treeFor !== null ? game.familyTree(treeFor) : null;
 
@@ -157,6 +160,7 @@ export function App({ game }: { game: Game }) {
             ui={ui}
             rewindOpen={rewindOpen}
             chronicleOpen={chronicleOpen}
+            statsOpen={statsOpen}
             skipOpen={skipOpen}
             onSkip={() => {
               setChronicleOpen(false);
@@ -169,7 +173,13 @@ export function App({ game }: { game: Game }) {
             onSound={() => game.setSound(!ui.soundOn)}
             onChronicle={() => {
               setTreeFor(null);
+              setStatsOpen(false);
               setChronicleOpen((open) => !open);
+            }}
+            onStats={() => {
+              setTreeFor(null);
+              setChronicleOpen(false);
+              setStatsOpen((open) => !open);
             }}
           />
           <PowersRail
@@ -218,6 +228,7 @@ export function App({ game }: { game: Game }) {
               species={game.speciesList()}
               faith={game.faithInfo()}
               peoples={game.peoples()}
+              civTech={game.civTech()}
               planet={ui.planetName}
               epoch={ui.epoch}
               onPerson={openPerson}
@@ -228,6 +239,7 @@ export function App({ game }: { game: Game }) {
               onClose={() => setChronicleOpen(false)}
             />
           )}
+          {statsOpen && <StatsPanel stats={game.stats()} onClose={() => setStatsOpen(false)} />}
           {skipOpen && !ui.skip && (
             <SkipMenu
               onClose={() => setSkipOpen(false)}

@@ -19,7 +19,9 @@ import type {
   Person,
   Sex,
 } from '../sim/life/types';
-import { HAIR_GREY, type Deity, type PrayerNeed, type SpeciesId } from '../sim/life/types';
+import { HAIR_GREY, type Deity, type GovForm, type LawId, type PrayerNeed, type SpeciesId } from '../sim/life/types';
+import { CIV_IDS, CIV_TECHS, type CivId } from '../sim/life/civtech';
+import { HISTORY_FIELDS } from '../sim/life/civ';
 import { INVENTION_IDS, INVENTIONS, BIT, listOf, type InventionId, type Task } from '../sim/life/inventions';
 
 type Someone = Person | ArchivedPerson;
@@ -110,6 +112,13 @@ export interface PersonInfo {
   /** The people (Volk) they belong to, and what they did wrong. */
   tribe: { name: string; hue: number } | null;
   crimes: number;
+  /** Money (once there is money), and rich or poor compared with the neighbours. */
+  wealth: number | null;
+  standing: 'rich' | 'poor' | null;
+  /** Rules the people (title depends on the form of government). */
+  ruler: GovForm | null;
+  /** The village or town they live in. */
+  home: string | null;
   /** How strongly they believe (0–1), in what, and whether they lead the rites. */
   faith: number;
   belief: Deity | null;
@@ -142,7 +151,7 @@ export interface FamilyTree {
   grandchildren: number;
 }
 
-export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'conflict' | 'knowledge' | 'animals' | 'faith' | 'nature';
+export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'conflict' | 'civ' | 'knowledge' | 'animals' | 'faith' | 'nature';
 
 export interface ChronicleLine {
   index: number;
@@ -157,6 +166,12 @@ export interface ChronicleLine {
   tribe?: string;
   other?: string;
   winner?: string;
+  /** A village or town the line is about (and where it is). */
+  place?: string;
+  from?: string;
+  cell?: number;
+  /** Sex of person a (for titles). */
+  sex?: Sex;
   major: boolean;
   category: ChronicleCategory;
   /** The person to open when the line is tapped. */
@@ -227,6 +242,40 @@ export interface TribeInfo {
   endedYear: number | null;
   religion: Deity | null;
   relations: { id: number; name: string; hue: number; value: number; state: RelationState; traded: boolean }[];
+  gov: GovForm;
+  rulerSex: 'f' | 'm';
+  laws: LawId[];
+  unrest: number;
+  /** Everyone, counted inhabitants included. */
+  total: number;
+  settlements: SettlementInfo[];
+  tech: CivId[];
+}
+
+export interface SettlementInfo {
+  id: number;
+  name: string;
+  cell: number;
+  people: number;
+  size: 0 | 1 | 2 | 3;
+  fields: number;
+  price: number;
+  temple: boolean;
+  wall: boolean;
+  foundedYear: number;
+}
+
+export interface CivTechInfo {
+  id: CivId;
+  needs: CivId[];
+  /** Peoples who know it. */
+  peoples: { name: string; hue: number }[];
+  first?: { name: string; year: number; tribe: string };
+}
+
+export interface StatsInfo {
+  fields: readonly string[];
+  rows: number[][];
 }
 
 export interface WarInfo {
@@ -291,6 +340,16 @@ const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
   battle: 'conflict',
   peace: 'conflict',
   conquered: 'conflict',
+  civTech: 'civ',
+  settled: 'civ',
+  grew: 'civ',
+  colony: 'civ',
+  abandoned: 'civ',
+  government: 'civ',
+  ruler: 'civ',
+  election: 'civ',
+  revolt: 'conflict',
+  law: 'civ',
   religionGone: 'faith',
   answered: 'faith',
 };
@@ -395,6 +454,10 @@ export class PeopleInfo {
       teacher: !!living?.teacher && living.teacher > t,
       tribe: this.tribeOf(x.band),
       crimes: living?.crimes ?? 0,
+      wealth: living?.wealth !== undefined ? Math.round(living.wealth) : null,
+      standing: living?.alive ? life.civ.standing(living) : null,
+      ruler: alive && life.tribes.tribeOfBand(x.band)?.chief === x.id && life.tribes.tribeOfBand(x.band)!.gov !== undefined ? life.tribes.tribeOfBand(x.band)!.gov! : null,
+      home: alive ? (life.civ.homeOf(x.band)?.name ?? null) : null,
       faith: living ? (living.faith ?? 0) : 0,
       belief: this.deityOf(x.belief),
       shaman: !!x.shaman,
@@ -465,7 +528,11 @@ export class PeopleInfo {
       major: !!e.major,
       category: CATEGORY[e.key],
     };
-    if (e.a !== undefined) line.a = this.name(e.a);
+    if (e.a !== undefined) {
+      line.a = this.name(e.a);
+      const who = this.life.anyone(e.a);
+      if (who) line.sex = who.sex;
+    }
     if (e.b !== undefined) line.b = this.name(e.b);
     if (e.c !== undefined) line.c = this.name(e.c);
     if (e.n !== undefined) line.n = e.n;
@@ -476,6 +543,17 @@ export class PeopleInfo {
     if (e.x !== undefined) line.tribe = tribes.tribe(e.x)?.name;
     if (e.y !== undefined) line.other = tribes.tribe(e.y)?.name;
     if (e.key === 'peace' && e.s) line.winner = tribes.tribe(Number(e.s))?.name;
+    if ((e.key === 'settled' || e.key === 'grew' || e.key === 'colony' || e.key === 'abandoned' || e.key === 'conquered') && e.n !== undefined) {
+      const h = this.life.civ.settlement(e.n);
+      if (h) {
+        line.place = h.name;
+        line.cell = h.cell;
+      }
+    }
+    if (e.key === 'colony' && e.c !== undefined) {
+      line.from = this.life.civ.settlement(e.c)?.name;
+      line.c = undefined;
+    }
     if ((e.key === 'religion' || e.key === 'religionGone') && e.n !== undefined) {
       const rel = this.life.faith.religion(e.n);
       if (rel) line.s = rel.deity;
@@ -537,7 +615,16 @@ export class PeopleInfo {
       .map((tr): TribeInfo => {
         const s = size.get(tr.id) ?? { people: 0, groups: 0 };
         const rel = tr.ended === undefined ? sys.mainBelief(tr) : -1;
+        const homes = life.civ.settlements.filter((h) => h.tribe === tr.id && h.ended === undefined);
+        const ruler = life.anyone(tr.chief);
         return {
+          gov: tr.gov ?? 'band',
+          rulerSex: ruler?.sex ?? 'm',
+          laws: [...(tr.laws ?? [])],
+          unrest: tr.unrest ?? 0,
+          total: s.people + homes.reduce((n, h) => n + Math.floor(h.crowd), 0),
+          settlements: homes.map((h) => this.settlementInfo(h)).sort((a, b) => b.people - a.people),
+          tech: CIV_IDS.filter((id) => life.civ.knows(tr, id)),
           id: tr.id,
           name: tr.name,
           hue: tr.hue,
@@ -577,6 +664,56 @@ export class PeopleInfo {
       }))
       .sort((a, b) => (a.endYear === null ? 0 : 1) - (b.endYear === null ? 0 : 1) || b.startYear - a.startYear);
     return { tribes, wars };
+  }
+
+  settlementInfo(h: import('../sim/life/types').Settlement): SettlementInfo {
+    const civ = this.life.civ;
+    return {
+      id: h.id,
+      name: h.name,
+      cell: h.cell,
+      people: civ.inhabitants(h),
+      size: civ.sizeOf(h),
+      fields: h.fields,
+      price: h.price,
+      temple: !!h.temple,
+      wall: !!h.wall,
+      foundedYear: dateFromMinutes(h.founded).year,
+    };
+  }
+
+  /** The settlement at or next to a cell. */
+  settlementNear(cell: number): SettlementInfo | null {
+    const planet = this.planet;
+    for (const h of this.life.civ.living()) {
+      if (h.cell === cell) return this.settlementInfo(h);
+      for (let k = planet.neighborOffsets[h.cell]; k < planet.neighborOffsets[h.cell + 1]; k++) if (planet.neighbors[k] === cell) return this.settlementInfo(h);
+    }
+    return null;
+  }
+
+  /** Knowledge of civilisation: who knows what, who found it first. */
+  civTech(): CivTechInfo[] {
+    const life = this.life;
+    const firsts = new Map<string, { name: string; year: number; tribe: string }>();
+    for (const c of life.chronicle) {
+      if (c.key === 'civTech' && c.s && c.a !== undefined && !firsts.has(c.s)) firsts.set(c.s, { name: this.name(c.a) ?? '?', year: dateFromMinutes(c.t).year, tribe: life.tribes.tribe(c.x)?.name ?? '?' });
+    }
+    return CIV_IDS.map((id) => {
+      const info: CivTechInfo = {
+        id,
+        needs: [...CIV_TECHS[id].needs],
+        peoples: life.tribes.living().filter((tr) => life.civ.knows(tr, id)).map((tr) => ({ name: tr.name, hue: tr.hue })),
+      };
+      const first = firsts.get(id);
+      if (first) info.first = first;
+      return info;
+    });
+  }
+
+  /** The yearly statistics. */
+  stats(): StatsInfo {
+    return { fields: HISTORY_FIELDS, rows: this.life.civ.history };
   }
 
   private deityOf(id: number | undefined): Deity | null {

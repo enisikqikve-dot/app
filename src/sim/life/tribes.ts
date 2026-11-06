@@ -107,9 +107,18 @@ export class TribeSystem {
       }
     }
     const tribe: Tribe = { id, name, founded: life.t, hue: Math.round(hue * 1000) / 1000, origin, chief: band.leader, culture: [50, 50, 50], rel: [] };
-    if (parent !== undefined) tribe.parent = parent;
+    if (parent !== undefined) {
+      tribe.parent = parent;
+      // A people that splits off keeps the crafts and writings of the old one.
+      const old = this.tribe(parent);
+      if (old?.tech) tribe.tech = old.tech;
+      if (old?.lore) tribe.lore = old.lore;
+    }
     this.tribes.push(tribe);
     band.tribe = id;
+    // Their village goes with them.
+    const home = life.civ.homeOf(band.id);
+    if (home) home.tribe = id;
     this.updateCulture(tribe);
     if (origin !== 'first') {
       // The old people does not like to see them go (less so when they left peacefully).
@@ -170,7 +179,8 @@ export class TribeSystem {
   maybeMurder(p: Person, q: Person, world: World): boolean {
     const life = this.life;
     if (p.traits[T_AGGRESSIVE] < 72 || life.opinion(p, q.id) > -65) return false;
-    const chance = 0.12 + (p.feel?.kind === 'anger' ? 0.25 : 0) - p.traits[T_KIND] / 400;
+    const law = life.politics.hasLaw(this.tribeOfBand(p.band), 'murder') ? 0.4 : 1;
+    const chance = (0.12 + (p.feel?.kind === 'anger' ? 0.25 : 0) - p.traits[T_KIND] / 400) * law;
     if (!life.rng.chance(chance)) return false;
     life.die(q, 'murder');
     life.log(p, 'murdered', { other: q.id });
@@ -195,8 +205,10 @@ export class TribeSystem {
   /** Once a day for each adult: the hungry and unkind may steal from a neighbouring group. */
   personDaily(p: Person, world: World, age: number): void {
     const life = this.life;
-    if (age < 15 || p.hunger < 0.6 || p.traits[T_KIND] > 45 || p.traits[T_AGGRESSIVE] < 48) return;
-    if (!life.rng.chance(0.03)) return;
+    const poor = life.civ.standing(p) === 'poor';
+    if (age < 15 || p.hunger < (poor ? 0.4 : 0.6) || p.traits[T_KIND] > (poor ? 55 : 45) || p.traits[T_AGGRESSIVE] < 48) return;
+    const law = life.politics.hasLaw(this.tribeOfBand(p.band), 'theft');
+    if (!life.rng.chance(law ? 0.012 : 0.03)) return;
     const own = life.band(p.band);
     let victim: Band | undefined;
     for (const b of life.bands) {
@@ -257,6 +269,7 @@ export class TribeSystem {
     const living = this.living();
     // Chiefs: the leader of each people's largest group.
     for (const tribe of living) {
+      if (!life.politics.chiefByGroups(tribe)) continue;
       let chief = -1;
       let size = -1;
       let groups = 0;
@@ -367,6 +380,9 @@ export class TribeSystem {
     const tb = b.tribe;
     if (ta === undefined || tb === undefined || ta === tb) return;
     this.addRelation(ta, tb, 2);
+    const x = this.tribe(ta);
+    const y = this.tribe(tb);
+    if (x && y) life.civ.shareByTrade(x, y);
     const t = this.tribe(ta);
     if (t && !(t.traded ?? []).includes(tb)) {
       t.traded = [...(t.traded ?? []), tb];
@@ -397,7 +413,7 @@ export class TribeSystem {
     if (n === 0) return;
     const recentWars = this.wars.filter((w) => (w.a === tribe.id || w.b === tribe.id) && (w.end === undefined || life.t - w.end < 30 * YEAR)).length;
     const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
-    tribe.culture = [clamp(war / n + recentWars * 8), clamp(pious / n), clamp(open / n - recentWars * 5)];
+    tribe.culture = [clamp(war / n + Math.min(12, recentWars * 4)), clamp(pious / n), clamp(open / n - Math.min(10, recentWars * 3))];
   }
 
   private yearly(world: World, t: number): void {
@@ -426,7 +442,7 @@ export class TribeSystem {
         const pair = this.nearestGroups(a.id, b.id, world);
         if (!pair || !world.within(this.camp(pair[0]), this.camp(pair[1]), world.kmPerCell * BATTLE_CELLS)) continue;
         const war = Math.max(a.culture[0], b.culture[0]);
-        if (war > 50) this.addRelation(a.id, b.id, -(war - 50) / 5);
+        if (war > 56) this.addRelation(a.id, b.id, -(war - 56) / 6);
         const ba = belief.get(a.id)!;
         const bb = belief.get(b.id)!;
         if (ba >= 0 && bb >= 0 && ba !== bb && a.culture[1] > 45 && b.culture[1] > 45) this.addRelation(a.id, b.id, -5);
@@ -464,12 +480,14 @@ export class TribeSystem {
       for (const r of a.rel) {
         const b = this.tribe(r[0]);
         if (!b || b.ended !== undefined || this.war(a.id, b.id) || r[1] > -35) continue;
+        // After a war comes a long truce.
+        if (this.wars.some((w) => w.end !== undefined && t - w.end < 30 * YEAR && ((w.a === a.id && w.b === b.id) || (w.a === b.id && w.b === a.id)))) continue;
         const pair = this.nearestGroups(a.id, b.id, world);
         if (!pair || !world.within(this.camp(pair[0]), this.camp(pair[1]), world.kmPerCell * BATTLE_CELLS)) continue;
         const chief = life.person(a.chief);
         const reason = this.reasonFor(a, b, chief);
         const drive = (a.culture[0] / 60) * (reason ? 1 : 0.3) * (r[1] < -60 ? 1.6 : 1) * (chief ? 0.6 + chief.traits[T_AGGRESSIVE] / 125 : 1);
-        if (!life.rng.chance(Math.min(0.6, 0.2 * drive))) continue;
+        if (!life.rng.chance(Math.min(0.4, 0.09 * drive))) continue;
         const war: War = { id: life.raw.nextId++, a: a.id, b: b.id, reason: reason ?? 'land', start: t, dead: [0, 0], battles: 0 };
         this.wars.push(war);
         life.chron('war', { x: a.id, y: b.id, s: war.reason, ...(chief ? { a: chief.id } : {}), major: 1 });
@@ -575,8 +593,18 @@ export class TribeSystem {
     for (const p of [...winDead, ...loseDead]) life.die(p, 'war');
     const winTribe = win.tribe!;
     const aSide = winTribe === w.a;
-    w.dead[aSide ? 0 : 1] += winDead.length;
-    w.dead[aSide ? 1 : 0] += loseDead.length;
+    // The counted inhabitants of their towns fight and fall too.
+    const crowdLoss = (band: Band, share: number) => {
+      const home = life.civ.homeOf(band.id);
+      if (!home) return 0;
+      const n = Math.floor(home.crowd * share * (home.wall ? 0.5 : 1));
+      home.crowd -= n;
+      return n;
+    };
+    const winCrowd = crowdLoss(win, life.rng.range(0.01, 0.04));
+    const loseCrowd = crowdLoss(lose, life.rng.range(0.05, 0.12));
+    w.dead[aSide ? 0 : 1] += winDead.length + winCrowd;
+    w.dead[aSide ? 1 : 0] += loseDead.length + loseCrowd;
     w.battles++;
     for (const p of life.members(win.id)) {
       life.addMood(p, 'victory', 8, 15);
@@ -591,7 +619,7 @@ export class TribeSystem {
     life.chron('battle', {
       x: winTribe,
       y: lose.tribe,
-      n: winDead.length + loseDead.length,
+      n: winDead.length + loseDead.length + winCrowd + loseCrowd,
       ...(winLeader ? { a: winLeader.id } : {}),
       ...(loseLeader ? { b: loseLeader.id } : {}),
       major: 1,
@@ -603,11 +631,13 @@ export class TribeSystem {
     const left = life.members(lose.id).length;
     if (left > 0 && (left <= 4 || loseDead.length >= left * 0.5)) {
       const leader = life.person(lose.leader);
-      if (leader?.alive && leader.traits[T_BRAVE] < 45 && life.emigrate(leader, world, t)) {
+      const home = life.civ.homeOf(lose.id);
+      if (!home && leader?.alive && leader.traits[T_BRAVE] < 45 && life.emigrate(leader, world, t)) {
         // emigrate() writes the chronicle line (they move away).
       } else {
         lose.tribe = winTribe;
-        life.chron('conquered', { x: winTribe, y: loserTribe?.id, ...(leader ? { a: leader.id } : {}), major: 1 });
+        if (home) home.tribe = winTribe;
+        life.chron('conquered', { x: winTribe, y: loserTribe?.id, ...(leader ? { a: leader.id } : {}), ...(home ? { n: home.id } : {}), major: 1 });
       }
     }
   }

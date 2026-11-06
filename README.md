@@ -8,7 +8,29 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 7 – Stämme & Konflikte ✅
+## Stand: Meilenstein 8 – Zivilisation ✅
+
+**Neu: Die Menschen werden sesshaft. Aus Dörfern werden Städte mit Gesetzen, Herrschern, Geld und Märkten.**
+
+- **Wissen der Zivilisation:** Ackerbau, Viehzucht, Weberei, Lehmziegelbau, Rad und Karren, Schrift und Geld.
+  - Ab dem Ackerbau gehört Wissen einem ganzen Volk. Nachbarn lernen es beim Handel voneinander.
+  - Mit der Schrift geht kein Wissen mehr verloren.
+- **Dörfer und Städte:** Ein Volk mit Ackerbau gründet Dörfer. Felder breiten sich aus, Bauern arbeiten auf dem Feld, und aus Dörfern werden Städte und Großstädte.
+  - Volle Städte schicken Siedler aus, die neue Dörfer gründen.
+  - Mit Steuern entstehen Tempel und in Kriegszeiten Stadtmauern.
+  - Zu sehen sind Häuser, Felder im Lauf der Jahreszeiten, Stufentempel, Mauern und nachts die Lichter der Städte.
+- **Viele Menschen, flüssig gerechnet:** In jeder Siedlung lebt eine kleine Gruppe von Menschen, denen du folgen kannst. Alle anderen Einwohner werden gezählt (Geburten, Hunger, Seuchen, Krieg). So wachsen Städte auf Tausende Einwohner.
+- **Geld und Märkte:** Menschen verdienen und geben aus. Durch Erbe entstehen reiche und arme Familien, Arme stehlen eher, der Markt hat einen Essenspreis.
+- **Regierungsformen:** Häuptlingstum, Ältestenrat, Königreich mit Erbfolge, Priesterherrschaft, Republik und Demokratie mit Wahlen, Diktatur nach Putschen.
+  - Unzufriedenheit (Armut, Hunger, verlorene Kriege, ein ungeliebter Herrscher) führt zu Aufständen und Revolutionen.
+  - Flüsterst du jemandem „Anführer werden“ in einem Königreich oder einer Diktatur, greift er nach der Macht.
+- **Gesetze** (mit der Schrift): Diebstahl- und Mordverbot, Fehdeverbot, Steuern, Marktrecht, Staatsreligion, Gleichheit. Sie wirken: Es gibt weniger Verbrechen, Steuern bauen Tempel, die Staatsreligion bekehrt.
+- **📈 Statistik (neuer Knopf oben):** Diagramme über alle Jahre (Menschen, Völker, Orte, Erfindungen, Gläubige, Kriege, Ungleichheit, Essenspreis) mit Fadenkreuz und Tabellenansicht.
+- **Chronik:** neuer Filter „Zivilisation“, Wissens-Reiter mit Zivilisations-Wissen, Völker-Reiter mit Regierung, Herrscher, Gesetzen und Orten (antippen zum Hinfliegen).
+- **Akte:** Herrscher-Titel, reich oder arm, Besitz und Wohnort. Ein angetipptes Dorf zeigt Einwohner, Felder und Essenspreis.
+- **Epochen:** Jungsteinzeit (mit Ackerbau) und frühe Hochkultur (mit Schrift).
+
+### Meilenstein 7 – Stämme & Konflikte ✅
 
 **Neu: Aus Gruppen werden Völker. Sie handeln miteinander, streiten und führen Kriege.**
 

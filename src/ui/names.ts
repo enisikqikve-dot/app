@@ -43,3 +43,13 @@ export function inventionName(id: InventionId | string): string {
 export function deityName(id: string, inSentence = false): string {
   return t(`${inSentence ? 'deityAcc' : 'deity'}.${id}` as MessageKey);
 }
+
+/** "Ackerbau", "Schrift" … */
+export function civName(id: string): string {
+  return t(`civ.${id}` as MessageKey);
+}
+
+/** "Königin", "Präsident" … for the ruler of a form of government. */
+export function rulerTitle(form: string, sex: 'f' | 'm'): string {
+  return t(`title.${form}.${sex}` as MessageKey);
+}

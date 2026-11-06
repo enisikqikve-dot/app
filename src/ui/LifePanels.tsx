@@ -4,7 +4,8 @@ import type { HerdInfo, PersonInfo } from '../game/Game';
 import type { PersonRef, RelationInfo } from '../game/peopleInfo';
 import { TRAITS } from '../sim/life/types';
 import { biomeName } from './format';
-import { deityName, geneWords, inventionName, speciesName } from './names';
+import { civName, deityName, geneWords, inventionName, rulerTitle, speciesName } from './names';
+import { CIV_IDS } from '../sim/life/civtech';
 import { INVENTION_IDS } from '../sim/life/inventions';
 import { SPECIES_IDS } from '../sim/life/species';
 import { IconBlessing, IconClose, IconFollow, IconTree, IconWhisper } from './icons';
@@ -89,7 +90,9 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
             {p.pregnant && <span class="chip chip-cond">{t('person.pregnant')}</span>}
             {p.lucky && <span class="chip chip-gold">{t('person.lucky')}</span>}
             {p.teacher && <span class="chip chip-cond">{t('person.teacherChip')}</span>}
+            {p.ruler && <span class="chip chip-gold">{rulerTitle(p.ruler, p.sex)}</span>}
             {p.shaman && <span class="chip chip-gold">{t('person.shamanChip')}</span>}
+            {p.standing && <span class={`chip ${p.standing === 'rich' ? 'chip-gold' : 'chip-cond'}`}>{t(`person.${p.standing}` as MessageKey)}</span>}
             {p.crimes >= 3 ? <span class="chip chip-hot">{t('person.murderer')}</span> : p.crimes > 0 ? <span class="chip chip-hot">{t('person.thief')}</span> : null}
             {p.feeling && <span class="chip chip-cond">{t(`person.feeling.${p.feeling}` as MessageKey)}</span>}
             {p.sick && <span class="chip chip-hot">{t('person.sick')}</span>}
@@ -178,8 +181,10 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
           {p.tribe && (
             <p class="note">
               <TribeDot hue={p.tribe.hue} /> {t('peoples.name', { name: p.tribe.name })}
+              {p.home ? ` · ${t('person.livesIn', { place: p.home })}` : ''}
             </p>
           )}
+          {p.wealth !== null && <p class="note">{t('person.wealth', { n: formatNumber(p.wealth) })}</p>}
         </div>
       )}
 
@@ -218,7 +223,7 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
                       other: l.other ?? '?',
                       second: l.second ?? '?',
                       sign: l.key === 'sawSign' ? t(`sign.${l.n ?? 0}` as MessageKey) : '',
-                      invention: l.key === 'invented' || l.key === 'learned' ? inventionName(INVENTION_IDS[l.n ?? 0] ?? 'tools') : '',
+                      invention: l.key === 'invented' || l.key === 'learned' ? inventionName(INVENTION_IDS[l.n ?? 0] ?? 'tools') : l.key === 'civInvented' ? civName(CIV_IDS[l.n ?? 0] ?? 'farming') : '',
                       animal: l.key === 'hunted' ? t(`speciesOne.${SPECIES_IDS[l.n ?? 0] ?? 'deer'}` as MessageKey) : '',
                     })}
                   </span>

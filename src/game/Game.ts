@@ -32,7 +32,8 @@ import { Overlay, World, type ClimateShift } from '../sim/world';
 import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
 import { Life, REVIVE_WINDOW, TICK, type EventOutcome } from '../sim/life/life';
 import type { ChronicleKey, SpeciesId } from '../sim/life/types';
-import { PeopleInfo, type ChronicleLine, type FaithInfo, type PeoplesInfo, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
+import { CIV_BIT } from '../sim/life/civtech';
+import { PeopleInfo, type ChronicleLine, type CivTechInfo, type FaithInfo, type PeoplesInfo, type SettlementInfo, type StatsInfo, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
 import { BIT } from '../sim/life/inventions';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
 import { TerrainView } from '../render/terrain';
@@ -45,6 +46,7 @@ import { buildClouds } from '../render/clouds';
 import { AimRing, PlaceMarker } from '../render/marker';
 import { GodCamera } from '../render/godCamera';
 import { LifeView } from '../render/lifeView';
+import { TownView } from '../render/towns';
 import { BubbleLayer, bubbleSymbol, type BubbleItem } from '../render/bubbles';
 import { ParticleSystem } from '../render/fx/particles';
 import {
@@ -66,7 +68,7 @@ import { SoundEngine, type SoundName } from '../audio/sound';
 import { isLifeData, parseSaveData, sanitizeEvents, type LifeSnapshot, type SaveData } from './saveData';
 
 export type { SaveData };
-export type { Activity, ChronicleLine, FaithInfo, PeoplesInfo, FamilyTree, KnowledgeInfo, PersonInfo, SpeciesInfo } from './peopleInfo';
+export type { Activity, ChronicleLine, CivTechInfo, FaithInfo, PeoplesInfo, SettlementInfo, StatsInfo, FamilyTree, KnowledgeInfo, PersonInfo, SpeciesInfo } from './peopleInfo';
 
 /** A snapshot of the living world kept in memory as compact text. */
 interface MemSnapshot {
@@ -135,6 +137,9 @@ export type PlaceCondition =
   | 'blessed'
   | 'plague';
 
+/** The age the world is in (from what people know). */
+export type Epoch = 'none' | 'paleolithic' | 'mesolithic' | 'neolithic' | 'civilization';
+
 export interface PlaceInfo {
   cell: number;
   biome: Biome;
@@ -153,6 +158,8 @@ export interface PlaceInfo {
   fresh: number;
   /** Food right now, 0 … ~1.6. */
   food: number;
+  /** A village or town here. */
+  settlement: SettlementInfo | null;
 }
 
 export interface HerdInfo {
@@ -215,7 +222,7 @@ export interface UiState {
   chronicleCount: number;
   skip: SkipProgress | null;
   skipSummary: SkipSummary | null;
-  epoch: 'none' | 'paleolithic' | 'mesolithic';
+  epoch: Epoch;
   climate: ClimateInfo;
   eventCount: number;
   soundOn: boolean;
@@ -233,6 +240,7 @@ interface PlanetScene {
   trees: TreeView;
   rivers: THREE.Mesh;
   lifeView: LifeView;
+  towns: TownView;
   fire: FireView;
   flood: FloodView;
   clouds: THREE.Group;
@@ -510,15 +518,16 @@ export class Game {
     const trees = new TreeView(this.season);
     const rivers = buildRivers(planet);
     const lifeView = new LifeView(planet, terrain);
+    const towns = new TownView(planet, terrain);
     const ocean = buildOcean(this.season, spec.size === 'large' ? 56 : spec.size === 'medium' ? 40 : 28);
     const fire = new FireView(fx);
     const flood = new FloodView(fxRoot);
     const clouds = buildClouds(planet);
     const atmosphere = buildAtmosphere();
     const sky = buildSky(spec.seed);
-    root.add(terrain.mesh, rivers, trees.group, lifeView.group, ocean, clouds, atmosphere.mesh, fxRoot);
+    root.add(terrain.mesh, rivers, trees.group, lifeView.group, towns.group, ocean, clouds, atmosphere.mesh, fxRoot);
     this.scene.add(root, sky.stars, sky.sun, sky.moon);
-    this.world = { world, overlay, root, fxRoot, terrain, trees, rivers, lifeView, fire, flood, clouds, sky, atmosphere, fx };
+    this.world = { world, overlay, root, fxRoot, terrain, trees, rivers, lifeView, towns, fire, flood, clouds, sky, atmosphere, fx };
 
     // Look at the people (or the home they would have).
     const first = life.people.find((p) => p.alive) ?? life.people[0];
@@ -541,7 +550,7 @@ export class Game {
       speedIndex: this.clock.speedIndex,
       timelapse: this.clock.timelapse,
       eventCount: world.events.length,
-      population: life.population(),
+      population: life.totalPopulation(),
       chronicleCount: life.chronicle.length,
     });
     this.save();
@@ -567,6 +576,7 @@ export class Game {
     for (const view of this.ongoing.values()) view.dispose();
     this.ongoing.clear();
     lifeView.reset();
+    this.world.towns.reset();
     this.bubbles.clear();
   }
 
@@ -1028,7 +1038,7 @@ export class Game {
     }
     this.applyOverlayViews(false);
     this.lastOverlayMinutes = this.clock.minutes;
-    this.ui.set({ eventCount: world.events.length, population: this.life.population() });
+    this.ui.set({ eventCount: world.events.length, population: this.life.totalPopulation() });
     this.save();
   }
 
@@ -1152,7 +1162,7 @@ export class Game {
     const kept = world.events.slice(0, point.eventCount).map((e) => ({ ...e, stamps: e.stamps ? [...e.stamps] : undefined }));
     // Back to the snapshot, then replay the powers used after it.
     world.rebuild(kept.slice(0, snap.eventCount));
-    const life = Life.restore(snap.json, { archive: this.life.archive, chronicle: this.life.chronicle });
+    const life = Life.restore(snap.json, { archive: this.life.archive, chronicle: this.life.chronicle, history: this.life.civ.history });
     for (let i = snap.eventCount; i < kept.length; i++) {
       const e = kept[i];
       life.advanceTo(e.minutes, world);
@@ -1173,7 +1183,7 @@ export class Game {
     if (this.selection?.kind === 'person' && !life.anyone(this.selection.id)) this.clearSelection();
     this.refreshEverything();
     if (this.selectedCell !== null) this.ui.set({ place: this.placeInfo(this.world.world.planet, this.selectedCell) });
-    this.ui.set({ eventCount: kept.length, date: dateFromMinutes(this.clock.minutes), population: life.population(), chronicleCount: life.chronicle.length });
+    this.ui.set({ eventCount: kept.length, date: dateFromMinutes(this.clock.minutes), population: life.totalPopulation(), chronicleCount: life.chronicle.length });
     this.save();
     this.play('chill');
     this.notify('notice.rewound');
@@ -1189,7 +1199,7 @@ export class Game {
     const life = this.life;
     const event = this.newEvent('timeSkip', -1);
     event.extra = Math.round(years * MINUTES_PER_YEAR);
-    const pop = life.population();
+    const pop = life.totalPopulation();
     const births = life.births;
     const deaths = life.deaths;
     const chronicle = life.chronicle.length;
@@ -1231,7 +1241,7 @@ export class Game {
       const years = (run.to - run.from) / MINUTES_PER_YEAR;
       this.ui.set({
         skip: { years, done: (life.t - run.from) / (run.to - run.from), year: dateFromMinutes(life.t).year },
-        population: life.population(),
+        population: life.totalPopulation(),
         date: dateFromMinutes(life.t),
       });
     }
@@ -1256,7 +1266,7 @@ export class Game {
     const summary: SkipSummary = {
       years: Math.round((life.t - run.from) / MINUTES_PER_YEAR),
       popBefore: run.pop,
-      popAfter: life.population(),
+      popAfter: life.totalPopulation(),
       births: life.births - run.births,
       deaths: life.deaths - run.deaths,
       lines,
@@ -1268,7 +1278,7 @@ export class Game {
     this.ui.set({
       skip: null,
       skipSummary: summary,
-      population: life.population(),
+      population: life.totalPopulation(),
       date: dateFromMinutes(life.t),
       chronicleCount: life.chronicle.length,
     });
@@ -1321,6 +1331,14 @@ export class Game {
     if (!this.world) return;
     const p = new THREE.Vector3().fromArray(this.world.world.planet.positions, cell * 3);
     this.cameraCtl.lookAt(p, Math.min(this.cameraCtl.targetDistance, R * 0.35));
+  }
+
+  civTech(): CivTechInfo[] {
+    return this.info?.civTech() ?? [];
+  }
+
+  stats(): StatsInfo {
+    return this.info?.stats() ?? { fields: [], rows: [] };
   }
 
   peoples(): PeoplesInfo {
@@ -1504,6 +1522,7 @@ export class Game {
     cam.updateMatrixWorld();
 
     lifeView.update(dt, life, now / 1000, t, cam, this.cameraCtl.distance, this.cameraCtl.focus);
+    this.world.towns.update(life, this.cameraCtl.distance < 70, this.cameraCtl.distance, this.realSunDir, t, now);
     this.updateMarkerAndBubbles();
 
     // Sun: real position, or a steady light in timelapse (days would flicker). Dust dims it.
@@ -1614,8 +1633,11 @@ export class Game {
   }
 
   /** The age the most advanced people live in. */
-  private epochNow(): UiState['epoch'] {
+  private epochNow(): Epoch {
     if (!this.life || this.life.population() === 0) return 'none';
+    const tech = this.life.tribes.living().reduce((m, tr) => m | (tr.tech ?? 0), 0);
+    if (tech & CIV_BIT.writing) return 'civilization';
+    if (tech & CIV_BIT.farming) return 'neolithic';
     const k = this.life.worldKnows();
     return k & BIT.bow && k & BIT.fishing ? 'mesolithic' : 'paleolithic';
   }
@@ -1632,7 +1654,7 @@ export class Game {
       focusHours: localSolarHours(lon, sunLon),
       focusDaylight: f.dot(this.realSunDir) > -0.05,
       climate: { kind: world.climateLabel(t), temperature: world.globalTemperature(t), dust: world.dust(t) },
-      population: this.life.population(),
+      population: this.life.totalPopulation(),
       epoch: this.epochNow(),
     };
     if (this.selectedCell !== null) patch.place = this.placeInfo(world.planet, this.selectedCell);
@@ -1707,6 +1729,7 @@ export class Game {
       conditions,
       fresh: planet.fresh[cell],
       food: this.life ? this.life.foodAt(world, cell, this.life.t) : 0,
+      settlement: this.info?.settlementNear(cell) ?? null,
     };
   }
 
@@ -1800,6 +1823,7 @@ export class Game {
     fire.dispose();
     flood.dispose();
     lifeView.dispose();
+    this.world.towns.dispose();
     const disposeObject = (obj: THREE.Object3D) => {
       obj.traverse((o) => {
         const mesh = o as THREE.Mesh;

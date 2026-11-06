@@ -43,6 +43,25 @@ export function PlacePanel({ place, onClose }: { place: PlaceInfo; onClose: () =
           <IconClose size={18} />
         </button>
       </div>
+      {place.settlement ? (
+        <div class="town-box">
+          <h3>
+            {t(`town.size.${place.settlement.size}` as MessageKey)} {place.settlement.name}
+          </h3>
+          <p class="note">
+            {[
+              t('town.people', { n: formatNumber(place.settlement.people) }),
+              t('town.fields', { n: formatNumber(place.settlement.fields) }),
+              t('town.since', { year: formatNumber(place.settlement.foundedYear) }),
+              place.settlement.size >= 1 ? t('town.price', { n: formatNumber(place.settlement.price) }) : '',
+              place.settlement.temple ? t('town.temple') : '',
+              place.settlement.wall ? t('town.wall') : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        </div>
+      ) : null}
       <p class="place-text">{biomeInfo(place.biome)}</p>
       <dl class="facts">
         {rows.map(([label, value]) => (
