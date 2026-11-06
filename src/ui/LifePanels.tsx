@@ -8,7 +8,7 @@ import { civName, deityName, geneWords, inventionName, rulerTitle, speciesName }
 import { CIV_IDS } from '../sim/life/civtech';
 import { INVENTION_IDS } from '../sim/life/inventions';
 import { SPECIES_IDS } from '../sim/life/species';
-import { IconBlessing, IconClose, IconFollow, IconTree, IconWhisper } from './icons';
+import { IconBlessing, IconClose, IconEye, IconFollow, IconTree, IconWhisper } from './icons';
 import { TribeDot } from './ChroniclePanel';
 
 function Bar({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
@@ -45,6 +45,7 @@ interface PersonProps {
   onWhisper: () => void;
   onBless: () => void;
   onTree: () => void;
+  onEyes: () => void;
   onPerson: (id: number) => void;
 }
 
@@ -67,7 +68,7 @@ function Names({ label, people, onPerson, opinion }: { label: string; people: (P
   );
 }
 
-export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper, onBless, onTree, onPerson }: PersonProps) {
+export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper, onBless, onTree, onEyes, onPerson }: PersonProps) {
   const [tab, setTab] = useState<Tab>('now');
   const tabs: Tab[] = p.alive ? ['now', 'character', 'family', 'life'] : ['character', 'family', 'life'];
   const shown: Tab = tabs.includes(tab) ? tab : tabs[0];
@@ -272,6 +273,12 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
           <IconTree size={16} />
           {t('person.tree')}
         </button>
+        {p.alive && (
+          <button type="button" class="btn small" onClick={onEyes}>
+            <IconEye size={16} />
+            {t('fp.start')}
+          </button>
+        )}
       </div>
     </aside>
   );

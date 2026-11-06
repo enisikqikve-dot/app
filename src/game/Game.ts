@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { Store, safeStorage } from '../core/store';
 import { randomSeed } from '../core/rng';
-import { encodeWorldCode, type PlanetSize, type WorldSpec } from '../core/worldCode';
+import { decodeWorldCode, encodeWorldCode, type PlanetSize, type WorldSpec } from '../core/worldCode';
 import type { MessageKey } from '../i18n';
 import {
   Clock,
@@ -47,6 +47,8 @@ import { AimRing, PlaceMarker } from '../render/marker';
 import { GodCamera } from '../render/godCamera';
 import { LifeView } from '../render/lifeView';
 import { TownView } from '../render/towns';
+import { Music, musicFor } from '../audio/music';
+import { decodeHistory, encodeHistory, saveFileName } from './share';
 import { BubbleLayer, bubbleSymbol, type BubbleItem } from '../render/bubbles';
 import { ParticleSystem } from '../render/fx/particles';
 import {
@@ -139,6 +141,21 @@ export type PlaceCondition =
 
 const EPOCH_ORDER: CivEpoch[] = ['stone', ...EPOCHS.map(([e]) => e)];
 
+/** What film mode shows right now (the interface writes the caption). */
+export type FilmCaption =
+  | { kind: 'line'; line: ChronicleLine }
+  | { kind: 'town'; name: string; people: number; size: number }
+  | { kind: 'person'; name: string }
+  | { kind: 'planet'; year: number };
+
+interface FilmShot {
+  cell: number;
+  dist: number;
+  tilt: number;
+  follow?: number;
+  caption: FilmCaption;
+}
+
 /** The age the world is in (from what people know). */
 export type Epoch = 'none' | 'paleolithic' | 'mesolithic' | Exclude<CivEpoch, 'stone'>;
 
@@ -225,6 +242,13 @@ export interface UiState {
   skip: SkipProgress | null;
   skipSummary: SkipSummary | null;
   epoch: Epoch;
+  musicOn: boolean;
+  /** Film mode: the camera tours the world by itself; what is shown now. */
+  film: { caption: FilmCaption | null } | null;
+  /** Seeing through someone's eyes (their name). */
+  firstPerson: string | null;
+  /** A shared world is being worked out again. */
+  replaying: boolean;
   climate: ClimateInfo;
   eventCount: number;
   soundOn: boolean;
@@ -312,6 +336,17 @@ export class Game {
   /** Whispered love: the person who is to love someone. */
   private pairFirst: number | null = null;
   private skipRun: SkipRun | null = null;
+  /** A shared world being rebuilt from its code: the powers still to replay. */
+  private replayRun: { events: PowerEvent[]; i: number; from: number; to: number } | null = null;
+  private readonly music = new Music(() => this.sound.output());
+  private epoch: Epoch = 'none';
+  private film: { shot: FilmShot | null; until: number; from: THREE.Vector3; to: THREE.Vector3; fromDist: number; started: number } | null = null;
+  private fp: { id: number; fwd: THREE.Vector3; last: THREE.Vector3 | null } | null = null;
+
+  /** Busy with a time skip or with rebuilding a shared world: no powers then. */
+  private get busy(): boolean {
+    return !!this.skipRun || !!this.replayRun;
+  }
   private lastSkipUi = 0;
   private effects: Effect[] = [];
   private ongoing = new Map<number, OngoingView>();
@@ -370,6 +405,10 @@ export class Game {
       soundOn: this.sound.enabled,
       notice: null,
       error: null,
+      musicOn: this.music.enabled,
+      film: null,
+      firstPerson: null,
+      replaying: false,
     });
 
     const resize = () => this.resize();
@@ -696,7 +735,7 @@ export class Game {
   }
 
   private onTap(clientX: number, clientY: number): void {
-    if (this.skipRun) return;
+    if (this.busy) return;
     if (!this.armed) {
       const entity = this.pickEntity(clientX, clientY, () => true);
       if (entity) this.selectEntity(entity.kind, entity.id);
@@ -831,7 +870,7 @@ export class Game {
    * Powers aimed at a place act where the person stands.
    */
   castOn(kind: PowerKind, id: number): void {
-    if (!this.world || !this.life || this.skipRun) return;
+    if (!this.world || !this.life || this.busy) return;
     const p = this.life.person(id);
     if (!p) return;
     const def = powerDef(kind);
@@ -961,7 +1000,7 @@ export class Game {
   }
 
   private onBrush(phase: 'start' | 'move' | 'end', clientX: number, clientY: number): void {
-    if (!this.world || !this.armed || this.skipRun) return;
+    if (!this.world || !this.armed || this.busy) return;
     const { world, fx } = this.world;
     if (phase === 'end') {
       if (this.stroke) {
@@ -1152,7 +1191,7 @@ export class Game {
   }
 
   rewindTo(point: RewindPoint): void {
-    if (!this.world || !this.life || this.skipRun) return;
+    if (!this.world || !this.life || this.busy) return;
     const snap = this.findSnapshot(point);
     if (!snap) return;
     for (const e of this.effects) e.dispose();
@@ -1195,7 +1234,7 @@ export class Game {
 
   /** Jumps years ahead: the living world is computed in larger steps, without waiting for the clock. */
   timeSkip(years: number): void {
-    if (!this.world || !this.life || this.skipRun) return;
+    if (!this.world || !this.life || this.busy) return;
     this.arm(null);
     this.following = false;
     const life = this.life;
@@ -1328,6 +1367,281 @@ export class Game {
     return this.info?.species() ?? [];
   }
 
+  // ---------------------------------------------------------------- music, film, first person
+
+  setMusic(on: boolean): void {
+    this.music.setEnabled(on);
+    this.ui.set({ musicOn: on });
+  }
+
+  /** Film mode: the camera tours the world by itself, with a caption for each scene. */
+  startFilm(): void {
+    if (!this.world || !this.life) return;
+    this.stopFirstPerson();
+    this.clearSelection();
+    this.arm(null);
+    this.film = { shot: null, until: 0, from: new THREE.Vector3(), to: new THREE.Vector3(), fromDist: this.cameraCtl.distance, started: 0 };
+    this.ui.set({ film: { caption: null } });
+  }
+
+  stopFilm(): void {
+    this.film = null;
+    this.cameraCtl.tiltOffset = 0;
+    this.ui.set({ film: null });
+  }
+
+  private pickShot(): FilmShot | null {
+    const life = this.life;
+    const planet = this.world?.world.planet;
+    if (!life || !planet || !this.info) return null;
+    const year = MINUTES_PER_YEAR;
+    const shots: [number, () => FilmShot | null][] = [];
+    // Something that just happened, at the place it happened.
+    const recent: number[] = [];
+    for (let i = life.chronicle.length - 1; i >= 0 && recent.length < 12; i--) {
+      const c = life.chronicle[i];
+      if (life.t - c.t > 3 * year) break;
+      if (c.major && c.a !== undefined && life.person(c.a)?.alive) recent.push(i);
+    }
+    if (recent.length) {
+      shots.push([
+        0.4,
+        () => {
+          const i = recent[Math.floor(Math.random() * recent.length)];
+          const p = life.person(life.chronicle[i].a!)!;
+          return { cell: p.cell, dist: 6, tilt: 0.5, follow: p.id, caption: { kind: 'line', line: this.info!.chronicleLine(life.chronicle[i], i) } };
+        },
+      ]);
+    }
+    const towns = life.civ.living();
+    if (towns.length) {
+      shots.push([
+        0.25,
+        () => {
+          const s = towns[Math.floor(Math.random() * towns.length)];
+          return { cell: s.cell, dist: 12 + Math.random() * 10, tilt: 0.42, caption: { kind: 'town', name: s.name, people: life.civ.inhabitants(s), size: life.civ.sizeOf(s) } };
+        },
+      ]);
+    }
+    const alive = life.people.filter((p) => p.alive);
+    if (alive.length) {
+      shots.push([
+        0.25,
+        () => {
+          const p = alive[Math.floor(Math.random() * alive.length)];
+          return { cell: p.cell, dist: 4.5, tilt: 0.55, follow: p.id, caption: { kind: 'person', name: p.name } };
+        },
+      ]);
+    }
+    shots.push([0.1, () => ({ cell: Math.floor(Math.random() * planet.cellCount), dist: 150, tilt: 0, caption: { kind: 'planet', year: dateFromMinutes(life.t).year } })]);
+    let r = Math.random() * shots.reduce((s, [w]) => s + w, 0);
+    for (const [w, make] of shots) {
+      r -= w;
+      if (r <= 0) return make();
+    }
+    return shots[shots.length - 1][1]();
+  }
+
+  private updateFilm(dt: number, now: number): void {
+    const film = this.film!;
+    if (!this.world) return;
+    if (this.cameraCtl.userPanned) {
+      // Taking the camera ends the film.
+      this.stopFilm();
+      return;
+    }
+    if (!film.shot || now >= film.until) {
+      const shot = this.pickShot();
+      if (!shot) return;
+      film.shot = shot;
+      film.started = now;
+      film.until = now + (shot.caption.kind === 'planet' ? 7000 : 10000);
+      film.from.copy(this.cameraCtl.focus);
+      film.to.copy(this.world.fx.surfacePoint(shot.cell)).normalize();
+      film.fromDist = this.cameraCtl.distance;
+      this.ui.set({ film: { caption: shot.caption } });
+    }
+    const shot = film.shot;
+    const k = Math.min(1, (now - film.started) / 2600);
+    const ease = k * k * (3 - 2 * k);
+    // Fly up between far-apart scenes, then down again.
+    const apart = film.from.angleTo(film.to);
+    const hop = Math.sin(Math.PI * ease) * Math.min(120, apart * 160);
+    if (k < 1) {
+      const dir = film.from.clone().lerp(film.to, ease).normalize();
+      this.cameraCtl.lookAt(dir, film.fromDist + (shot.dist - film.fromDist) * ease + hop);
+    } else if (shot.follow !== undefined) {
+      const pos = this.world.lifeView.shownPosition(shot.follow);
+      if (pos) this.cameraCtl.moveFocusToward(pos, 1 - Math.exp(-dt * 3));
+    }
+    this.cameraCtl.targetDistance = k < 1 ? this.cameraCtl.distance : shot.dist;
+    this.cameraCtl.tiltOffset += (shot.tilt - this.cameraCtl.tiltOffset) * (1 - Math.exp(-dt * 2));
+  }
+
+  /** Seeing the world through the eyes of the selected person. */
+  startFirstPerson(): void {
+    if (this.selection?.kind !== 'person' || !this.life?.person(this.selection.id)?.alive) return;
+    this.fp = { id: this.selection.id, fwd: new THREE.Vector3(), last: null };
+    this.following = true;
+    this.cameraCtl.targetDistance = Math.min(this.cameraCtl.targetDistance, 8);
+    this.ui.set({ firstPerson: this.life.person(this.selection.id)!.name, following: true });
+  }
+
+  stopFirstPerson(): void {
+    if (!this.fp) return;
+    this.fp = null;
+    this.ui.set({ firstPerson: null });
+  }
+
+  private updateFirstPerson(dt: number): void {
+    const fp = this.fp!;
+    const p = this.life?.person(fp.id);
+    const pos = this.world?.lifeView.shownPosition(fp.id);
+    if (!p?.alive || !pos || this.selection?.id !== fp.id) {
+      this.stopFirstPerson();
+      return;
+    }
+    const up = pos.clone().normalize();
+    // Looking where they walk (or keep looking the same way while they stand).
+    if (fp.last) {
+      const move = pos.clone().sub(fp.last);
+      move.addScaledVector(up, -move.dot(up));
+      if (move.lengthSq() > 1e-8) fp.fwd.lerp(move.normalize(), 1 - Math.exp(-dt * 3));
+    }
+    fp.last = pos.clone();
+    fp.fwd.addScaledVector(up, -fp.fwd.dot(up));
+    if (fp.fwd.lengthSq() < 1e-6) fp.fwd.set(up.z, 0, -up.x);
+    fp.fwd.normalize();
+    const cam = this.cameraCtl.camera;
+    cam.position.copy(pos).addScaledVector(up, 0.46).addScaledVector(fp.fwd, -0.08);
+    cam.up.copy(up);
+    cam.lookAt(pos.clone().addScaledVector(up, 0.36).addScaledVector(fp.fwd, 3));
+    cam.near = 0.02;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+  }
+
+  // ---------------------------------------------------------------- sharing
+
+  /** Saves the whole world as a file (all of it: it loads at once). */
+  async exportFile(): Promise<'saved' | 'declined' | 'failed'> {
+    const data = this.snapshot();
+    if (!data || !this.life) return 'failed';
+    const text = JSON.stringify(data);
+    const name = saveFileName(this.ui.get().planetName, dateFromMinutes(this.life.t).year);
+    const host = (window as unknown as { claude?: { use?: (n: string) => Promise<unknown> } }).claude;
+    type Downloads = { save: (r: { filename: string; data: string }) => Promise<unknown> };
+    let downloads: Downloads | null = null;
+    try {
+      downloads = host?.use ? ((await host.use('downloads')) as Downloads | null) : null;
+    } catch {
+      downloads = null;
+    }
+    if (downloads) {
+      try {
+        await downloads.save({ filename: name, data: text });
+        return 'saved';
+      } catch (err) {
+        return (err as { code?: string })?.code === 'declined' ? 'declined' : 'failed';
+      }
+    }
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      return 'saved';
+    } catch {
+      return 'failed';
+    }
+  }
+
+  /** Loads a world from a saved file. */
+  async importFile(text: string): Promise<boolean> {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return false;
+    }
+    const save = parseSaveData(raw);
+    const spec = save ? decodeWorldCode(save.code) : null;
+    if (!save || !spec) return false;
+    this.stopFilm();
+    this.stopFirstPerson();
+    await this.start(spec, save);
+    return true;
+  }
+
+  /** A code with the whole history (planet, start and every power used). */
+  async historyCode(): Promise<string | null> {
+    if (!this.spec || !this.world || !this.life) return null;
+    const start = this.life.raw.start ?? this.life.chronicle[0]?.t;
+    if (start === undefined) return null;
+    return encodeHistory({ code: encodeWorldCode(this.spec), start, minutes: this.life.t, events: this.world.world.events });
+  }
+
+  /** Rebuilds a shared world from its history code (worked out again while you watch). */
+  async loadHistory(text: string): Promise<boolean> {
+    const h = await decodeHistory(text);
+    const spec = h ? decodeWorldCode(h.code) : null;
+    if (!h || !spec) return false;
+    this.stopFilm();
+    this.stopFirstPerson();
+    await this.createWorld(spec, { code: h.code, minutes: h.start, speedIndex: 1, events: [] });
+    if (!this.life || !this.world) return false;
+    const events = h.events.filter((e) => e.minutes >= this.life!.t);
+    this.replayRun = { events, i: 0, from: this.life.t, to: Math.max(h.minutes, this.life.t) };
+    this.ui.set({ replaying: true, skip: { years: (this.replayRun.to - this.replayRun.from) / MINUTES_PER_YEAR, done: 0, year: dateFromMinutes(this.life.t).year } });
+    return true;
+  }
+
+  private runReplay(now: number): void {
+    const run = this.replayRun!;
+    const life = this.life!;
+    const world = this.world!.world;
+    const until = performance.now() + 45;
+    while (performance.now() < until) {
+      const next = run.events[run.i];
+      const target = next ? next.minutes : run.to;
+      if (life.t < target) {
+        life.advanceTo(target, world, 300);
+        continue;
+      }
+      if (!next) break;
+      world.apply(next);
+      life.applyEvent(next, world);
+      this.nextEventId = Math.max(this.nextEventId, next.id + 1);
+      run.i++;
+    }
+    this.clock.minutes = Math.max(this.clock.minutes, life.t);
+    if (run.i >= run.events.length && life.t >= run.to) {
+      this.replayRun = null;
+      if (life.skipping) this.cutSkips(world, life.t);
+      this.clock.minutes = life.t;
+      this.snapshots = [];
+      this.takeSnapshot(true);
+      this.seenChronicle = life.chronicle.length;
+      this.lastPrayerNotice = -Infinity;
+      this.refreshEverything();
+      this.ui.set({ replaying: false, skip: null, eventCount: world.events.length, population: life.totalPopulation(), chronicleCount: life.chronicle.length });
+      this.notify('notice.replayed');
+      return;
+    }
+    if (now - this.lastSkipUi > 150) {
+      this.lastSkipUi = now;
+      this.ui.set({
+        skip: { years: (run.to - run.from) / MINUTES_PER_YEAR, done: (life.t - run.from) / Math.max(1, run.to - run.from), year: dateFromMinutes(life.t).year },
+        population: life.totalPopulation(),
+        date: dateFromMinutes(life.t),
+      });
+    }
+  }
+
   /** Turns the view to a place on the planet (a holy place, a praying group). */
   showCell(cell: number): void {
     if (!this.world) return;
@@ -1452,6 +1766,8 @@ export class Game {
 
     if (this.skipRun) {
       this.runSkip(now);
+    } else if (this.replayRun) {
+      this.runReplay(now);
     } else {
       // Time: the clock moves (not while shaping the land), the living world follows step by step.
       if (!this.stroke) this.clock.advance(dt);
@@ -1518,6 +1834,7 @@ export class Game {
             : null;
       if (target && !this.following) this.cameraCtl.moveFocusToward(target, 1 - Math.exp(-dt * 6));
     }
+    if (this.film) this.updateFilm(dt, now);
     this.cameraCtl.userPanned = false;
     this.cameraCtl.update(dt);
     const cam = this.cameraCtl.camera;
@@ -1525,6 +1842,8 @@ export class Game {
 
     lifeView.update(dt, life, now / 1000, t, cam, this.cameraCtl.distance, this.cameraCtl.focus);
     this.world.towns.update(life, this.cameraCtl.distance < 70, this.cameraCtl.distance, this.realSunDir, t, now);
+    if (this.fp) this.updateFirstPerson(dt);
+    this.music.update(musicFor(this.epoch === 'paleolithic' || this.epoch === 'mesolithic' || this.epoch === 'none' ? 'stone' : this.epoch));
     this.updateMarkerAndBubbles();
 
     // Sun: real position, or a steady light in timelapse (days would flicker). Dust dims it.
@@ -1593,16 +1912,18 @@ export class Game {
       const p = this.life.person(e.id);
       if (!p) continue;
       const selected = this.selection?.kind === 'person' && selectedId === p.id;
+      // Seeing through someone's eyes: their own bubble would sit in the middle of the view.
+      if (this.fp?.id === p.id) continue;
       items.push({ id: p.id, pos: e.pos, symbol: bubbleSymbol(p, this.life.t), label: selected ? p.name : undefined, selected });
     }
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.bubbles.update(items, this.cameraCtl.camera, w, h, this.cameraCtl.distance);
-    if (this.selection) {
+    if (this.selection && !this.fp) {
       const pos = lifeView.shownPosition(this.selection.id);
       if (pos) this.marker.moveTo(pos);
       else this.marker.hide();
-    }
+    } else if (this.fp) this.marker.hide();
   }
 
   /** Keeps rain clouds, storms, waves and eruptions on screen while their scars are active. */
@@ -1666,7 +1987,7 @@ export class Game {
       focusDaylight: f.dot(this.realSunDir) > -0.05,
       climate: { kind: world.climateLabel(t), temperature: world.globalTemperature(t), dust: world.dust(t) },
       population: this.life.totalPopulation(),
-      epoch: this.epochNow(),
+      epoch: (this.epoch = this.epochNow()),
     };
     if (this.selectedCell !== null) patch.place = this.placeInfo(world.planet, this.selectedCell);
     if (this.selection?.kind === 'person') {

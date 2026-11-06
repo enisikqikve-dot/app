@@ -34,17 +34,19 @@ export function SkipMenu({ onPick, onClose }: { onPick: (years: number) => void;
   );
 }
 
-export function SkipBar({ skip, onStop }: { skip: SkipProgress; onStop: () => void }) {
+export function SkipBar({ skip, replaying, onStop }: { skip: SkipProgress; replaying?: boolean; onStop: () => void }) {
   const pct = Math.round(skip.done * 100);
   return (
     <div class="skip-bar glass-strong" role="status">
-      <span class="skip-label">{t('skip.running', { year: formatNumber(skip.year) })}</span>
+      <span class="skip-label">{t(replaying ? 'share.replaying' : 'skip.running', { year: formatNumber(skip.year) })}</span>
       <span class="need-bar skip-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
         <span class="need-fill" style={{ width: `${pct}%` }} />
       </span>
-      <button type="button" class="btn small" onClick={onStop}>
-        {t('skip.stop')}
-      </button>
+      {!replaying && (
+        <button type="button" class="btn small" onClick={onStop}>
+          {t('skip.stop')}
+        </button>
+      )}
     </div>
   );
 }

@@ -11,11 +11,48 @@ interface Props {
   onClose: () => void;
   onCreate: (spec: WorldSpec) => void;
   onLang: (lang: Lang) => void;
+  onMusic: (on: boolean) => void;
+  onFilm: () => void;
+  onExport: () => Promise<'saved' | 'declined' | 'failed'>;
+  onImport: (text: string) => Promise<boolean>;
+  onHistoryCode: () => Promise<string | null>;
+  onHistoryLoad: (code: string) => Promise<boolean>;
 }
 
 const LANG_NAMES: Record<Lang, string> = { de: 'Deutsch', en: 'English' };
 
-export function Menu({ ui, onClose, onCreate, onLang }: Props) {
+export function Menu({ ui, onClose, onCreate, onLang, onMusic, onFilm, onExport, onImport, onHistoryCode, onHistoryLoad }: Props) {
+  const [shareNote, setShareNote] = useState<string | null>(null);
+  const [history, setHistory] = useState('');
+  const [historyOut, setHistoryOut] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const exportFile = async () => {
+    const r = await onExport();
+    setShareNote(t(r === 'saved' ? 'share.saved' : r === 'declined' ? 'share.declined' : 'share.failed'));
+  };
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    const ok = await onImport(await file.text());
+    if (!ok) setShareNote(t('share.badFile'));
+  };
+  const copyHistory = async () => {
+    const code = await onHistoryCode();
+    if (!code) {
+      setShareNote(t('share.failed'));
+      return;
+    }
+    setHistoryOut(code);
+    try {
+      await navigator.clipboard.writeText(code);
+      setShareNote(t('share.codeCopied', { n: formatNumber(code.length) }));
+    } catch {
+      setShareNote(t('share.codeShown'));
+    }
+  };
+  const loadHistory = async () => {
+    const ok = await onHistoryLoad(history);
+    if (!ok) setShareNote(t('share.badCode'));
+  };
   const [size, setSize] = useState<PlanetSize>(ui.size);
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
@@ -160,6 +197,52 @@ export function Menu({ ui, onClose, onCreate, onLang }: Props) {
           </button>
           <p class="note">{t('menu.replaceNote')}</p>
         </form>
+
+        <section class="menu-section">
+          <h3>{t('share.title')}</h3>
+          <div class="share-row">
+            <button type="button" class="btn" onClick={() => void exportFile()}>
+              {t('share.saveFile')}
+            </button>
+            <button type="button" class="btn" onClick={() => fileRef.current?.click()}>
+              {t('share.loadFile')}
+            </button>
+            <input ref={fileRef} type="file" accept=".json,application/json" class="visually-hidden" onChange={(e) => void importFile((e.target as HTMLInputElement).files?.[0])} />
+            <button type="button" class="btn" onClick={() => void copyHistory()}>
+              {t('share.copyCode')}
+            </button>
+          </div>
+          {historyOut && <textarea class="input mono share-code" readOnly rows={3} value={historyOut} onFocus={(e) => (e.target as HTMLTextAreaElement).select()} />}
+          <div class="code-row">
+            <input
+              class="input mono"
+              type="text"
+              autoComplete="off"
+              spellcheck={false}
+              placeholder={t('share.codePlaceholder')}
+              value={history}
+              aria-label={t('share.codePlaceholder')}
+              onInput={(e) => setHistory((e.target as HTMLInputElement).value)}
+            />
+            <button type="button" class="btn" disabled={!history.trim()} onClick={() => void loadHistory()}>
+              {t('share.loadCode')}
+            </button>
+          </div>
+          <p class="note">{shareNote ?? t('share.note')}</p>
+        </section>
+
+        <section class="menu-section">
+          <h3>{t('menu.extras')}</h3>
+          <div class="share-row">
+            <button type="button" class={`btn${ui.musicOn ? ' btn-primary' : ''}`} aria-pressed={ui.musicOn} onClick={() => onMusic(!ui.musicOn)}>
+              {ui.musicOn ? t('music.on') : t('music.off')}
+            </button>
+            <button type="button" class="btn" onClick={onFilm}>
+              {t('film.start')}
+            </button>
+          </div>
+          <p class="note">{t('menu.extrasNote')}</p>
+        </section>
 
         <section class="menu-section">
           <h3>{t('menu.language')}</h3>

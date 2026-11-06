@@ -66,6 +66,12 @@ export class SoundEngine {
     return this.ctx;
   }
 
+  /** The audio context and the main output (for the music), once sound is unlocked. */
+  output(): { ctx: AudioContext; out: AudioNode } | null {
+    const ctx = this.ensure();
+    return ctx && this.master ? { ctx, out: this.master } : null;
+  }
+
   /** volume 0 … 1 (e.g. quieter when the camera is far away). */
   play(name: SoundName, volume = 1): void {
     if (!this.enabled) return;

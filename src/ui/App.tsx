@@ -14,6 +14,7 @@ import { PlacePanel } from './PlacePanel';
 import { HerdPanel, PersonPanel } from './LifePanels';
 import { FamilyTreeView } from './FamilyTree';
 import { StatsPanel } from './StatsPanel';
+import { FilmOverlay } from './FilmOverlay';
 import { ChroniclePanel } from './ChroniclePanel';
 import { chronicleText } from './chronicleText';
 import { inventionName } from './names';
@@ -97,6 +98,8 @@ export function App({ game }: { game: Game }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || menuOpen || rewindOpen) return;
+      if (ui.film) return game.stopFilm();
+      if (ui.firstPerson) return game.stopFirstPerson();
       if (treeFor !== null) setTreeFor(null);
       else if (skipOpen) setSkipOpen(false);
       else if (ui.skipSummary) game.closeSkipSummary();
@@ -154,7 +157,16 @@ export function App({ game }: { game: Game }) {
 
   return (
     <div class="hud">
-      {ui.ready && (
+      {ui.ready && ui.film && <FilmOverlay caption={ui.film.caption} planet={ui.planetName} onStop={() => game.stopFilm()} />}
+      {ui.ready && !ui.film && ui.firstPerson && (
+        <div class="fp-banner glass" role="status">
+          <span>{t('fp.banner', { name: ui.firstPerson })}</span>
+          <button type="button" class="btn small" onClick={() => game.stopFirstPerson()}>
+            {t('fp.stop')}
+          </button>
+        </div>
+      )}
+      {ui.ready && !ui.film && !ui.firstPerson && (
         <>
           <TopBar
             ui={ui}
@@ -215,6 +227,7 @@ export function App({ game }: { game: Game }) {
                 setPalette('blessing');
               }}
               onTree={() => setTreeFor(ui.person!.id)}
+              onEyes={() => game.startFirstPerson()}
               onPerson={openPerson}
             />
           )}
@@ -250,7 +263,7 @@ export function App({ game }: { game: Game }) {
               }}
             />
           )}
-          {ui.skip && <SkipBar skip={ui.skip} onStop={() => game.stopSkip()} />}
+          {ui.skip && <SkipBar skip={ui.skip} replaying={ui.replaying} onStop={() => game.stopSkip()} />}
           {ui.skipSummary && !ui.skip && (
             <SkipSummaryPanel
               summary={ui.skipSummary}
@@ -355,6 +368,26 @@ export function App({ game }: { game: Game }) {
           ui={ui}
           onClose={() => setMenuOpen(false)}
           onLang={changeLang}
+          onMusic={(on) => game.setMusic(on)}
+          onFilm={() => {
+            setMenuOpen(false);
+            setChronicleOpen(false);
+            setStatsOpen(false);
+            closePalette();
+            game.startFilm();
+          }}
+          onExport={() => game.exportFile()}
+          onImport={async (text) => {
+            const ok = await game.importFile(text);
+            if (ok) setMenuOpen(false);
+            return ok;
+          }}
+          onHistoryCode={() => game.historyCode()}
+          onHistoryLoad={async (code) => {
+            const ok = await game.loadHistory(code);
+            if (ok) setMenuOpen(false);
+            return ok;
+          }}
           onCreate={(spec) => {
             setMenuOpen(false);
             void game.start(spec, null);

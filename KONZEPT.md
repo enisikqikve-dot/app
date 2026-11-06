@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 6. November 2026 · Version 1.2 · Phase: Meilenstein 10 fertig (Sci-Fi-Zukunft)
+Stand: 6. November 2026 · Version 2.0 · Phase: alle Meilensteine fertig
 
 ---
 
@@ -937,7 +937,7 @@ nächsten Schritte.
 | ✅ 8 | **Zivilisation** | Ackerbau, Viehzucht, Dörfer und Städte (mit gezählten Einwohnern), Siedler, Geld und Märkte, Arm und Reich, Regierungsformen mit Erbfolge, Wahlen und Putschen, Gesetze, Schrift, Statistiken |
 | ✅ 9 | **Durch die Epochen** | Bronzezeit bis digitales Zeitalter (13 neue Erfindungen, 9 Zeitalter), Gebäude und Kleidung je Epoche, Seefahrt und Städte auf anderen Kontinenten, Leistung für Millionen Menschen |
 | ✅ 10 | **Sci-Fi-Zukunft** | Roboter, KI-Wesen und KI-Regierung, Cyborgs, Klone (auch als Kraft), fliegende Städte, Wettermaschinen gegen dein Wetter, Zeitreisende, die Menschen entdecken dich, Aufstand der Maschinen |
-| 11 | **Feinschliff** | Musik pro Epoche, Film-Modus, Ich-Perspektive, Welt teilen (Datei und Code), Balancing |
+| ✅ 11 | **Feinschliff** | Musik pro Epoche (live erzeugt), Film-Modus mit Untertiteln, Ich-Perspektive, Welt teilen als Datei und als Code mit ganzer Geschichte, Balancing |
 
 **Erster spielbarer Prototyp:** Meilensteine 1–3. Schon nach Meilenstein 2
 kannst du Blitze, Vulkane und Meteoriten auf deinen Planeten werfen. Nach

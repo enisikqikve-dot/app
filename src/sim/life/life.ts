@@ -269,6 +269,7 @@ export class Life {
       structures: [],
       species: [],
       everKnown: 0,
+      start,
     });
     for (const base of SPECIES_IDS) life.newSpecies(base, '', [0.5, 0.5, 0.5]);
     const rng = new Rng(world.planet.seed).fork('first-people');

@@ -8,7 +8,19 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 10 – Sci-Fi-Zukunft ✅
+## Stand: Alle Meilensteine fertig ✅ (Meilenstein 11 – Feinschliff)
+
+**Das Spiel ist komplett: von 6 Menschen in der Steinzeit bis zu schwebenden Städten und Zeitmaschinen.**
+
+- **Musik je Epoche** (Menü → Musik und Film): Sie entsteht live im Browser und ändert sich mit der Zeit der Welt: Flöte und Trommel am Steinzeitfeuer, Leier über einem Bordun in der Antike, mittelalterliche Weisen, Klavier im Industriezeitalter, warme Synthesizer-Akkorde in der Moderne, Arpeggios im digitalen Zeitalter und gläserne Klänge in der Zukunft. Nichts wiederholt sich genau. Mit dem Ton-Knopf oben wird alles stumm.
+- **Film-Modus** (Menü → 🎬): Kinobalken, und die Kamera fliegt von selbst zu dem, was gerade passiert, zu Städten, Menschen und hinaus ins All, mit einem Untertitel aus der Chronik. Beenden mit Esc, durch Ziehen oder über den Knopf.
+- **Ich-Perspektive** (Akte → 👁): Sieh die Welt mit den Augen eines Menschen. Die Kamera geht mit und blickt in die Richtung, in die er geht.
+- **Welt teilen** (Menü → Welt teilen):
+  - **Als Datei speichern / Datei laden:** die ganze Welt mit allem, lädt sofort.
+  - **Code mit Geschichte:** ein kurzer Text mit dem Planeten, dem Start und jeder deiner Taten. Weil die Welt immer gleich rechnet, entsteht daraus beim Laden genau dieselbe Geschichte (mit Fortschrittsbalken).
+- **Feinschliff:** Wer eine Person mit den eigenen Augen sieht, sieht keine Markierung mehr vor sich, Roboter haben eine Betriebszeit statt eines Alters, fliegende Felseninseln sind beleuchtet, Klone entstehen nicht mehrfach, die Epochen-Anzeige kennt alle 13 Zeitalter.
+
+### Meilenstein 10 – Sci-Fi-Zukunft ✅
 
 **Neu: Nach dem digitalen Zeitalter wird es verrückt: Roboter, denkende Maschinen, Klone, schwebende Städte. Und die Menschen finden dich.**
 

@@ -604,6 +604,8 @@ export interface LifeData {
   epochRecord?: number;
   /** The people found out that you exist (with time machines). */
   godFound?: boolean;
+  /** When the first people appeared (to rebuild the world from a code). */
+  start?: number;
   /** Append-only: one row of numbers per year (see HISTORY_FIELDS). */
   history?: number[][];
   historyCount?: number;
