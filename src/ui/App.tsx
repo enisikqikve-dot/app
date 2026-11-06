@@ -15,6 +15,8 @@ import { HerdPanel, PersonPanel } from './LifePanels';
 import { FamilyTreeView } from './FamilyTree';
 import { ChroniclePanel } from './ChroniclePanel';
 import { chronicleText } from './chronicleText';
+import { inventionName } from './names';
+import { SkipBar, SkipMenu, SkipSummaryPanel } from './SkipPanels';
 import { Menu } from './Menu';
 import { IconMinus, IconPlus } from './icons';
 
@@ -31,7 +33,7 @@ function armedHint(kind: PowerKind, step: 'pick' | 'place' | 'pick2' | null): Me
 }
 
 function optionLabel(kind: PowerKind, value: number): string {
-  if (kind === 'spawnAnimals') return t(`speciesOne.${SPECIES_IDS[value]}` as MessageKey);
+  if (kind === 'spawnAnimals') return value >= SPECIES_IDS.length ? t('option.newSpecies') : t(`speciesOne.${SPECIES_IDS[value]}` as MessageKey);
   if (kind === 'sign') return t(`option.sign.${value}` as MessageKey);
   return String(value);
 }
@@ -46,6 +48,7 @@ export function App({ game }: { game: Game }) {
   const [rewindOpen, setRewindOpen] = useState(false);
   const [treeFor, setTreeFor] = useState<number | null>(null);
   const [chronicleOpen, setChronicleOpen] = useState(false);
+  const [skipOpen, setSkipOpen] = useState(false);
   const [welcome, setWelcome] = useState(() => safeStorage.get(WELCOME_KEY) !== '1');
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
   const toastTimer = useRef<number>(0);
@@ -68,7 +71,10 @@ export function App({ game }: { game: Game }) {
     const n = ui.notice;
     if (!n) return;
     if (n.line) showToast(chronicleText(n.line, ui.planetName), 5200);
-    else if (n.key) showToast(t(n.key, n.params), 5200);
+    else if (n.key) {
+      const params = n.params && typeof n.params.invention === 'string' ? { ...n.params, invention: inventionName(n.params.invention) } : n.params;
+      showToast(t(n.key, params), 5200);
+    }
   }, [ui.notice?.id]);
 
   // Keep the world code in the link so it can be shared.
@@ -90,6 +96,8 @@ export function App({ game }: { game: Game }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || menuOpen || rewindOpen) return;
       if (treeFor !== null) setTreeFor(null);
+      else if (skipOpen) setSkipOpen(false);
+      else if (ui.skipSummary) game.closeSkipSummary();
       else if (chronicleOpen) setChronicleOpen(false);
       else if (ui.armed) game.arm(null);
       else if (palette) closePalette();
@@ -97,7 +105,7 @@ export function App({ game }: { game: Game }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen, rewindOpen, palette, ui.armed, treeFor, chronicleOpen]);
+  }, [menuOpen, rewindOpen, palette, ui.armed, treeFor, chronicleOpen, skipOpen, ui.skipSummary]);
 
   const dismissWelcome = () => {
     setWelcome(false);
@@ -137,7 +145,7 @@ export function App({ game }: { game: Game }) {
 
   const ArmedIcon = ui.armed ? POWER_ICONS[ui.armed] : null;
   const options = ui.armed ? POWER_OPTIONS[ui.armed] : undefined;
-  const overlay = treeFor !== null || chronicleOpen;
+  const overlay = treeFor !== null || chronicleOpen || skipOpen || ui.skipSummary !== null || ui.skip !== null;
   const showPanels = !ui.armed && !rewindOpen && !overlay;
   const tree = treeFor !== null ? game.familyTree(treeFor) : null;
 
@@ -149,6 +157,12 @@ export function App({ game }: { game: Game }) {
             ui={ui}
             rewindOpen={rewindOpen}
             chronicleOpen={chronicleOpen}
+            skipOpen={skipOpen}
+            onSkip={() => {
+              setChronicleOpen(false);
+              setRewindOpen(false);
+              setSkipOpen((open) => !open);
+            }}
             onSpeed={(i) => game.setSpeed(i)}
             onMenu={() => setMenuOpen(true)}
             onRewind={() => setRewindOpen((open) => !open)}
@@ -161,6 +175,7 @@ export function App({ game }: { game: Game }) {
           <PowersRail
             open={palette}
             onOpen={(category) => {
+              if (ui.skip) return;
               dismissWelcome();
               setPaletteFor(null);
               setPalette((open) => (open === category ? null : category));
@@ -198,11 +213,35 @@ export function App({ game }: { game: Game }) {
           {tree && <FamilyTreeView tree={tree} onFocus={(id) => setTreeFor(id)} onOpen={openPerson} onClose={() => setTreeFor(null)} />}
           {chronicleOpen && (
             <ChroniclePanel
-              key={ui.chronicleCount}
               lines={game.chronicleLines()}
+              knowledge={game.knowledge()}
+              species={game.speciesList()}
               planet={ui.planetName}
+              epoch={ui.epoch}
               onPerson={openPerson}
               onClose={() => setChronicleOpen(false)}
+            />
+          )}
+          {skipOpen && !ui.skip && (
+            <SkipMenu
+              onClose={() => setSkipOpen(false)}
+              onPick={(years) => {
+                setSkipOpen(false);
+                closePalette();
+                game.timeSkip(years);
+              }}
+            />
+          )}
+          {ui.skip && <SkipBar skip={ui.skip} onStop={() => game.stopSkip()} />}
+          {ui.skipSummary && !ui.skip && (
+            <SkipSummaryPanel
+              summary={ui.skipSummary}
+              planet={ui.planetName}
+              onPerson={(id) => {
+                game.closeSkipSummary();
+                openPerson(id);
+              }}
+              onClose={() => game.closeSkipSummary()}
             />
           )}
           {rewindOpen && (

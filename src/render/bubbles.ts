@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import type { Person } from '../sim/life/types';
 
 const CHAT: Record<string, string> = { talk: '💬', flirt: '❤️', love: '❤️', quarrel: '😠', play: '🤸', comfort: '🤗' };
+const WORK: Partial<Record<Person['action'], string>> = { hunt: '🏹', fish: '🎣', build: '🔨', heal: '🌿', teach: '📖', tinker: '💡', fire: '🔥', eat: '🍖' };
 
 /** A symbol for what someone needs, feels or does right now (null: nothing to say). */
 export function bubbleSymbol(p: Person, t: number): string | null {
@@ -15,6 +16,9 @@ export function bubbleSymbol(p: Person, t: number): string | null {
   if (p.chat) return CHAT[p.chat.kind] ?? '💬';
   if (p.awe !== undefined) return '😮';
   if (p.action === 'sleep') return '💤';
+  const work = WORK[p.action];
+  if (work) return work;
+  if (p.goal === 'hunt') return '🏹';
   if (p.sick > 0) return '🤒';
   if (p.action === 'drink') return '💧';
   if (p.goal === 'water' || p.thirst > 0.8) return '💧';

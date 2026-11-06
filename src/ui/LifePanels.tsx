@@ -4,6 +4,9 @@ import type { HerdInfo, PersonInfo } from '../game/Game';
 import type { PersonRef, RelationInfo } from '../game/peopleInfo';
 import { TRAITS } from '../sim/life/types';
 import { biomeName } from './format';
+import { geneWords, inventionName, speciesName } from './names';
+import { INVENTION_IDS } from '../sim/life/inventions';
+import { SPECIES_IDS } from '../sim/life/species';
 import { IconBlessing, IconClose, IconFollow, IconTree, IconWhisper } from './icons';
 
 function Bar({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
@@ -84,6 +87,7 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
             {p.leader && <span class="chip chip-gold">{t('person.leaderChip')}</span>}
             {p.pregnant && <span class="chip chip-cond">{t('person.pregnant')}</span>}
             {p.lucky && <span class="chip chip-gold">{t('person.lucky')}</span>}
+            {p.teacher && <span class="chip chip-cond">{t('person.teacherChip')}</span>}
             {p.feeling && <span class="chip chip-cond">{t(`person.feeling.${p.feeling}` as MessageKey)}</span>}
             {p.sick && <span class="chip chip-hot">{t('person.sick')}</span>}
           </div>
@@ -146,6 +150,15 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
               <TraitBar key={id} label={t(`trait.${id}` as MessageKey)} value={p.traits[i] ?? 50} />
             ))}
           </div>
+          <div class="kin">
+            <h3>{t('person.knowledge')}</h3>
+            <p class="note">{p.know.length ? p.know.map((id) => inventionName(id)).join(' · ') : t('person.knowsNothing')}</p>
+          </div>
+          {p.task && (
+            <p class="note">
+              {t('person.task')}: {t(`task.${p.task}` as MessageKey)}
+            </p>
+          )}
           <p class="note">{looks}</p>
           {p.band && (
             <p class="note">{p.leader ? t('person.ownBand', { n: formatNumber(p.band.size) }) : t('person.band', { leader: p.band.leader, n: formatNumber(p.band.size) })}</p>
@@ -188,6 +201,8 @@ export function PersonPanel({ person: p, following, onFollow, onClose, onWhisper
                       other: l.other ?? '?',
                       second: l.second ?? '?',
                       sign: l.key === 'sawSign' ? t(`sign.${l.n ?? 0}` as MessageKey) : '',
+                      invention: l.key === 'invented' || l.key === 'learned' ? inventionName(INVENTION_IDS[l.n ?? 0] ?? 'tools') : '',
+                      animal: l.key === 'hunted' ? t(`speciesOne.${SPECIES_IDS[l.n ?? 0] ?? 'deer'}` as MessageKey) : '',
                     })}
                   </span>
                 </li>
@@ -230,7 +245,7 @@ export function HerdPanel({ herd, onClose }: { herd: HerdInfo; onClose: () => vo
     <aside class="place glass herd-panel" aria-live="polite">
       <div class="place-head">
         <div>
-          <h2 class="place-title">{t(`species.${herd.species}` as MessageKey)}</h2>
+          <h2 class="place-title">{speciesName(herd.species, herd.prefix)}</h2>
           <div class="chips">
             <span class="chip chip-cond">{t('herd.count', { n: formatNumber(herd.count) })}</span>
             <span class={`chip ${herd.activity === 'hungry' ? 'chip-hot' : 'chip-cond'}`}>{t(`herd.${herd.activity}` as MessageKey)}</span>
@@ -241,7 +256,9 @@ export function HerdPanel({ herd, onClose }: { herd: HerdInfo; onClose: () => vo
         </button>
       </div>
       <p class="place-text">{t(`speciesInfo.${herd.species}` as MessageKey)}</p>
-      <p class="note">{biomeName(herd.biome)}</p>
+      <p class="note">
+        {geneWords(herd.genes)} · {biomeName(herd.biome)}
+      </p>
     </aside>
   );
 }

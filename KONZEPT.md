@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 6. November 2026 · Version 0.6 · Phase: Meilenstein 4 fertig (Leben & Liebe)
+Stand: 6. November 2026 · Version 0.7 · Phase: Meilenstein 5 fertig (Wissen & lange Zeiten)
 
 ---
 
@@ -931,7 +931,7 @@ nächsten Schritte.
 | ✅ 2 | **Zorn & Natur** ⭐ | die Naturkräfte: Blitz, Regen, Dürre, Sturm, Erdbeben, Vulkan, Flut, Meteorit, Eiszeit, Landschaft formen; spektakuläre Effekte, erste Geräusche, **Zurückspulen** |
 | ✅ 3 | **Erstes Leben** | Pflanzen und Tiere im Ökosystem; 6 Menschen mit Hunger, Durst und Schlaf; Symbol-Blasen und Akte; Segen und Leben & Tod; Folgen-Modus. Glück, Fruchtbarkeit und Himmelszeichen folgen mit Meilenstein 4 |
 | ✅ 4 | **Leben & Liebe** | Charakter, Gefühle, Beziehungen, Altern und Tod, Kinder mit Vererbung, Stammbaum, Weltchronik, Gedanken flüstern; dazu Glück, Fruchtbarkeit und Himmelszeichen. Ideen und „Lehrer werden“ folgen mit Meilenstein 5 |
-| 5 | **Wissen & lange Zeiten** | Erfindungen entstehen von selbst, Wissen wird weitergegeben, Arbeit nach Bedarf, erste Hütten und Feuerstellen; **Zeitsprung**; Evolution der Tiere |
+| ✅ 5 | **Wissen & lange Zeiten** | Erfindungen entstehen von selbst (11 aus der Steinzeit), Wissen wird weitergegeben und kann verloren gehen, Arbeit nach Bedarf, Hütten und Feuerstellen; **Zeitsprung**; Evolution der Tiere mit neuen Arten; Flüstern von Ideen und „Lehrer werden“ |
 | 6 | **Glaube** | die Menschen entdecken dich, Schamanen, Religionen, Gebete, heilige Orte |
 | 7 | **Stämme & Konflikte** | Anführer, Abspaltung, mehrere Völker, Tauschhandel, Streit, Verbrechen, Krieg |
 | 8 | **Zivilisation** | Ackerbau, Dörfer und Städte, Geld und Märkte, Regierungsformen, Gesetze, Schrift, Statistiken |

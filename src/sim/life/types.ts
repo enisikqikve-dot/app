@@ -5,10 +5,10 @@
 
 export type Sex = 'f' | 'm';
 
-export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried';
+export type ActionKind = 'idle' | 'walk' | 'gather' | 'drink' | 'sleep' | 'rest' | 'carried' | 'eat' | 'hunt' | 'fish' | 'build' | 'heal' | 'teach' | 'tinker' | 'fire';
 
 /** Why a person is walking somewhere. */
-export type Goal = 'water' | 'food' | 'group' | 'family' | 'wander' | 'safety' | 'none';
+export type Goal = 'water' | 'food' | 'group' | 'family' | 'wander' | 'safety' | 'hunt' | 'work' | 'none';
 
 export type DeathCause =
   | 'hunger'
@@ -25,7 +25,8 @@ export type DeathCause =
   | 'quake'
   | 'age'
   | 'childbirth'
-  | 'fight';
+  | 'fight'
+  | 'hunt';
 
 /** Character traits, each 0 … 100 (stored in this order in `Person.traits`). */
 export const TRAITS = ['curious', 'diligent', 'brave', 'kind', 'aggressive', 'clever', 'pious', 'ambitious'] as const;
@@ -71,7 +72,11 @@ export type LogKey =
   | 'afraid'
   | 'angry'
   | 'forgave'
-  | 'comforted';
+  | 'comforted'
+  | 'invented'
+  | 'learned'
+  | 'hunted'
+  | 'teacher';
 
 export interface LogEntry {
   t: number;
@@ -99,7 +104,10 @@ export type MoodKey =
   | 'forgive'
   | 'peace'
   | 'luck'
-  | 'fled';
+  | 'fled'
+  | 'invented'
+  | 'song'
+  | 'hut';
 
 export interface Moodlet {
   key: MoodKey;
@@ -175,6 +183,14 @@ export interface Person {
   lead?: number;
   /** A faraway place this person leads the group to. */
   dest?: number;
+  /** What this person knows (bit mask of inventions). */
+  know: number;
+  /** The work this person does for the group (chosen each day). */
+  task?: import('./inventions').Task;
+  /** A whispered teacher until then. */
+  teacher?: number;
+  /** The herd being hunted, or the person being healed or taught. */
+  aim?: number;
 
   /** Cell the person is in (or leaving). */
   cell: number;
@@ -229,6 +245,8 @@ export interface ArchivedPerson {
   cell: number;
   spot: [number, number];
   log: LogEntry[];
+  /** What this person knew. */
+  know: number;
 }
 
 /** A group of people who live and move together. */
@@ -236,6 +254,34 @@ export interface Band {
   id: number;
   leader: number;
   founded: number;
+  /** Shared food (meat, fish), in portions of a full meal. */
+  food: number;
+}
+
+/** Something people built: a hut or a fireplace. */
+export interface Structure {
+  id: number;
+  kind: 'hut' | 'fire';
+  cell: number;
+  spot: [number, number];
+  band: number;
+  /** 0 … 1 while being built. */
+  built: number;
+  /** Last time someone used it (abandoned places fall apart). */
+  used: number;
+}
+
+/** An animal species: the four first ones, and new ones that evolve or that you create. */
+export interface SpeciesRecord {
+  id: number;
+  base: SpeciesId;
+  /** Name part from the genes ('' for the original species). */
+  prefix: string;
+  /** Size, fur, speed (0 … 1, 0.5 = like the ancestors) when the species appeared. */
+  genes: [number, number, number];
+  born: number;
+  extinct?: number;
+  parent?: number;
 }
 
 export type ChronicleKey =
@@ -252,7 +298,11 @@ export type ChronicleKey =
   | 'power'
   | 'sign'
   | 'population'
-  | 'extinct';
+  | 'extinct'
+  | 'invention'
+  | 'lost'
+  | 'species'
+  | 'speciesGone';
 
 /** One line in the world chronicle. */
 export interface ChronicleEntry {
@@ -283,6 +333,12 @@ export interface Herd {
   bornYear: number;
   /** Prey the pack is chasing (wolves). */
   prey: number;
+  /** Size, fur, speed (0 … 1, 0.5 = like the ancestors). */
+  genes: [number, number, number];
+  /** The species record. */
+  kind: number;
+  /** Last time hunters chased this herd (wolves or people). */
+  fear?: number;
 }
 
 /** Food used up in a cell; it grows back toward the cell's capacity over time. */
@@ -318,6 +374,16 @@ export interface LifeData {
   popRecord: number;
   /** Children born on the planet so far. */
   births?: number;
+  /** Deaths so far. */
+  deaths?: number;
+  /** Huts and fireplaces. */
+  structures: Structure[];
+  /** All animal species that ever lived. */
+  species: SpeciesRecord[];
+  /** Everything anyone ever knew (to tell discoveries from rediscoveries). */
+  everKnown: number;
+  /** Time skip: coarse steps until then. */
+  coarseUntil?: number;
 }
 
 /** Hair colors; the first six are genes (lower = dominant), the last is grey hair of old age. */

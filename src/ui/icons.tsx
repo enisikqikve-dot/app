@@ -434,3 +434,29 @@ export const IconTree = (p: IconProps) => (
     <path d="M12 7v4.5M6 16v-2.5h12V16" />
   </Icon>
 );
+
+// ---------------------------------------------------------------- milestone 5
+
+export const IconIdea = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 17h6M10 20.5h4" />
+    <path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.3 1 2.2h5.2c0-.9.4-1.7 1-2.2A6 6 0 0 0 12 3Z" />
+  </Icon>
+);
+
+export const IconTeach = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="7" cy="7" r="2.5" />
+    <path d="M3 20c0-3.9 1.8-6.5 4-6.5 1.5 0 2.6.9 3.3 2.3" />
+    <path d="M12 5h9v8h-9z" />
+    <path d="M14 8h5M14 10.5h3" />
+  </Icon>
+);
+
+export const IconSkip = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m4 6 7 6-7 6V6Z" />
+    <path d="m12 6 7 6-7 6V6Z" />
+    <path d="M21 5v14" />
+  </Icon>
+);

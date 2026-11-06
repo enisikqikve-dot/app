@@ -10,6 +10,9 @@ import {
   IconFear,
   IconFertility,
   IconForgive,
+  IconIdea,
+  IconSkip,
+  IconTeach,
   IconLead,
   IconLove,
   IconLuck,
@@ -73,6 +76,9 @@ export const POWER_ICONS: Record<PowerKind, ComponentType<{ size?: number }>> = 
   wEmigrate: IconEmigrate,
   wPeace: IconPeace,
   wLead: IconLead,
+  wIdea: IconIdea,
+  wTeach: IconTeach,
+  timeSkip: IconSkip,
 };
 
 const GROUPS: Record<PowerCategory, { key: MessageKey; kinds: PowerKind[] }[]> = {
@@ -88,7 +94,8 @@ const GROUPS: Record<PowerCategory, { key: MessageKey; kinds: PowerKind[] }[]> =
   ],
   whisper: [
     { key: 'powers.group.feelings', kinds: ['wLove', 'wCourage', 'wFear', 'wAnger', 'wForgive', 'wComfort'] },
-    { key: 'powers.group.intentions', kinds: ['wEmigrate', 'wPeace', 'wLead'] },
+    { key: 'powers.group.intentions', kinds: ['wEmigrate', 'wPeace', 'wLead', 'wTeach'] },
+    { key: 'powers.group.ideas', kinds: ['wIdea'] },
   ],
   life: [
     { key: 'powers.group.people', kinds: ['createPeople', 'move', 'smite'] },

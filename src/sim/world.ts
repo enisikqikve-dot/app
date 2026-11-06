@@ -489,6 +489,20 @@ export class World {
     return this.planted[cell] === 1;
   }
 
+  private readonly cosCache = new Map<number, number>();
+
+  /** True if two cells are at most `km` apart (cheaper than comparing kmBetween). */
+  within(a: number, b: number, km: number): boolean {
+    if (a === b) return true;
+    let c = this.cosCache.get(km);
+    if (c === undefined) {
+      c = Math.cos(Math.min(Math.PI, km / this.planet.radiusKm));
+      this.cosCache.set(km, c);
+    }
+    const p = this.planet.positions;
+    return p[a * 3] * p[b * 3] + p[a * 3 + 1] * p[b * 3 + 1] + p[a * 3 + 2] * p[b * 3 + 2] >= c;
+  }
+
   kmBetween(a: number, b: number): number {
     const p = this.planet.positions;
     const dot = p[a * 3] * p[b * 3] + p[a * 3 + 1] * p[b * 3 + 1] + p[a * 3 + 2] * p[b * 3 + 2];

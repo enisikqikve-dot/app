@@ -25,6 +25,18 @@ import { personName } from './names';
 import { SPECIES, SPECIES_IDS, habitatScore } from './species';
 import { childLook, childTraits, founderLook, hashUnit, randomTraits, type RandomSource } from './genetics';
 import { FLAG_FREEZING, moodReasons, moodValue, type MoodReason } from './mood';
+import {
+  BIT,
+  INVENTION_IDS,
+  INVENTIONS,
+  circumstanceFactor,
+  foresty,
+  nextSteps,
+  stony,
+  type Circumstances,
+  type InventionId,
+  type Task,
+} from './inventions';
 import type {
   ArchivedPerson,
   Band,
@@ -41,11 +53,15 @@ import type {
   Person,
   Sex,
   SpeciesId,
+  SpeciesRecord,
+  Structure,
 } from './types';
-import { T_AGGRESSIVE, T_AMBITIOUS, T_BRAVE, T_CLEVER, T_CURIOUS, T_KIND, TRAITS } from './types';
+import { T_AGGRESSIVE, T_AMBITIOUS, T_BRAVE, T_CLEVER, T_CURIOUS, T_DILIGENT, T_KIND, TRAITS } from './types';
 
 /** Simulation step in game minutes. */
 export const TICK = 20;
+/** During a time skip the simulation takes steps of this many ticks (2 hours). */
+export const COARSE = 6;
 const DAY = MINUTES_PER_DAY;
 const YEAR = DAY * DAYS_PER_YEAR;
 const TICKS_PER_DAY = DAY / TICK;
@@ -67,6 +83,9 @@ export const ADULT_AGE = 16;
 const FLAG_STARVING = 1;
 const FLAG_PARCHED = 2;
 
+/** Actions that do something for the group when they end. */
+const WORK_ACTIONS = new Set<Person['action']>(['hunt', 'fish', 'build', 'heal', 'teach', 'fire']);
+
 /** Lines in the life story that are kept when someone is archived. */
 const MAJOR_LOG = new Set<LogKey>([
   'created',
@@ -85,6 +104,8 @@ const MAJOR_LOG = new Set<LogKey>([
   'carried',
   'inLove',
   'madePeace',
+  'invented',
+  'teacher',
   'died',
 ]);
 
@@ -106,6 +127,15 @@ const CHRONICLED: ReadonlySet<PowerKind> = new Set<PowerKind>([
 ]);
 
 const POPULATION_MARKS = [10, 25, 50, 100, 200];
+/** Below this population every birth and death goes into the chronicle. */
+const SMALL_WORLD = 40;
+const MAX_STRUCTURES = 220;
+/** Meat portions from one animal. */
+const MEAT: Record<SpeciesId, number> = { deer: 4, bison: 6, mammoth: 14, wolf: 0 };
+/** Gene drift per generation toward what suits the place. */
+const SELECTION = 0.03;
+/** How far genes must move from a species' start to form a new species. */
+const SPECIATION = 0.3;
 
 /** How much food (berries, roots, shellfish) a biome offers, 0 … 1. */
 const BIOME_FOOD: Partial<Record<Biome, number>> = {
@@ -128,12 +158,14 @@ export function phaseOf(age: number): LifePhase {
 }
 
 /** Why a whisper or blessing cannot be used on someone (checked before it is used). */
-export type PowerBlock = 'young' | 'alreadyLeader' | 'noEnemies' | 'noPartner' | 'pregnant' | 'samePerson';
+export type PowerBlock = 'young' | 'alreadyLeader' | 'noEnemies' | 'noPartner' | 'pregnant' | 'samePerson' | 'noIdea' | 'nothingToTeach';
 
 /** What a power did to the living (for messages; replays ignore it). */
 export interface EventOutcome {
   person?: number;
   result?: 'accepted' | 'resisted' | 'noPlace';
+  /** A whispered idea: what was invented. */
+  invention?: InventionId;
 }
 
 /** Mulberry32 with its state in the open, so it can be saved. */
@@ -173,6 +205,24 @@ export class Life {
   private readonly byId = new Map<number, Someone>();
   private readonly bandById = new Map<number, Band>();
   private bandsChecked = false;
+  /** The idea a whisper gave (for the message). */
+  private idea: InventionId | undefined;
+  /** How many talks one talk stands for (time skip). */
+  private weight = 1;
+  private readonly byCell = new Map<number, Person[]>();
+  private memberCache: Map<number, Person[]> | null = null;
+  /** Herds near each group's camp (derived, refreshed daily). */
+  private readonly gameCache = new Map<number, { t: number; camp: number; herds: Herd[] }>();
+  /** Most herds the land can carry. */
+  private herdCap = MAX_HERDS;
+  /** Season and climate of the current day (derived; reset when a power changes the world). */
+  private seasonDay = -1;
+  private seasonNow = 0;
+  private climateNow = 0;
+  /** What each group knows (derived from its members; rebuilt when knowledge changes). */
+  private bandKnowCache: Map<number, number> | null = null;
+  /** Per group: someone sick, mean hunger, number of members. */
+  private bandStats: Map<number, { sick: boolean; hunger: number; size: number }> | null = null;
 
   private constructor(data: LifeData) {
     this.data = data;
@@ -189,7 +239,7 @@ export class Life {
   static create(world: World, t: number): Life {
     const start = Math.floor(t / TICK) * TICK;
     const life = new Life({
-      version: 4,
+      version: 5,
       t: start,
       rng: world.planet.seed ^ 0x5eed1e5,
       nextId: 1,
@@ -200,7 +250,11 @@ export class Life {
       archive: [],
       chronicle: [],
       popRecord: 0,
+      structures: [],
+      species: [],
+      everKnown: 0,
     });
+    for (const base of SPECIES_IDS) life.newSpecies(base, '', [0.5, 0.5, 0.5]);
     const rng = new Rng(world.planet.seed).fork('first-people');
     const home = Life.findHome(world);
     const band = life.newBand(-1);
@@ -210,7 +264,7 @@ export class Life {
       if (p) founders.push(p);
     }
     // They already know each other a little.
-    for (const p of founders) for (const q of founders) if (p !== q) life.addOp(p, q.id, Math.round(rng.range(8, 30)));
+    for (const p of founders) for (const q of founders) if (p !== q) life.addOp(p, q.id, Math.round(rng.range(15, 40)));
     life.electLeader(band, false);
     life.chron('founders', { n: founders.length, a: band.leader, major: 1 });
     life.spawnInitialHerds(world);
@@ -237,7 +291,35 @@ export class Life {
 
   /** Brings data from older versions (milestone 3) up to date, the same way every time. */
   private static upgrade(d: LifeData): LifeData {
-    if ((d.version ?? 3) >= 4) return d;
+    if ((d.version ?? 3) < 4) Life.upgradeTo4(d);
+    if (d.version < 5) Life.upgradeTo5(d);
+    return d;
+  }
+
+  /** Milestone 5: knowledge, shared food, camps and animal species. */
+  private static upgradeTo5(d: LifeData): void {
+    d.version = 5;
+    for (const p of d.people) p.know = p.know ?? 0;
+    for (const a of d.archive) a.know = a.know ?? 0;
+    for (const b of d.bands) b.food = b.food ?? 0;
+    d.structures = d.structures ?? [];
+    d.everKnown = d.everKnown ?? 0;
+    if (!Array.isArray(d.species) || d.species.length === 0) {
+      d.species = [];
+      const kinds = new Map<SpeciesId, number>();
+      for (const base of SPECIES_IDS) {
+        const rec: SpeciesRecord = { id: d.nextId++, base, prefix: '', genes: [0.5, 0.5, 0.5], born: 0 };
+        d.species.push(rec);
+        kinds.set(base, rec.id);
+      }
+      for (const h of d.herds) {
+        h.genes = h.genes ?? [0.5, 0.5, 0.5];
+        h.kind = h.kind ?? kinds.get(h.species)!;
+      }
+    }
+  }
+
+  private static upgradeTo4(d: LifeData): void {
     d.version = 4;
     d.archive = Array.isArray(d.archive) ? d.archive : [];
     d.chronicle = Array.isArray(d.chronicle) ? d.chronicle : [];
@@ -261,7 +343,6 @@ export class Life {
     }
     // Groups are formed on the first step, when the planet is at hand (see ensureBands).
     d.bands = [];
-    return d;
   }
 
   /** A deep copy of the full state (for saving). */
@@ -299,6 +380,27 @@ export class Life {
 
   get bands(): readonly Band[] {
     return this.data.bands;
+  }
+
+  get structures(): readonly Structure[] {
+    return this.data.structures;
+  }
+
+  /** Shared food of a group. */
+  bandFood(bandId: number): number {
+    return this.bandById.get(bandId)?.food ?? 0;
+  }
+
+  get births(): number {
+    return this.data.births ?? 0;
+  }
+
+  get deaths(): number {
+    return this.data.deaths ?? 0;
+  }
+
+  get everKnown(): number {
+    return this.data.everKnown;
   }
 
   get archive(): readonly ArchivedPerson[] {
@@ -343,8 +445,26 @@ export class Life {
     const partner = p.partner >= 0 ? this.person(p.partner) : undefined;
     let children = 0;
     for (const q of this.data.people) if (q.alive && (q.mother === p.id || q.father === p.id)) children++;
-    const reasons = moodReasons(p, this.data.t, { partnerAlive: !!partner?.alive, childrenAlive: children });
+    const reasons = moodReasons(p, this.data.t, {
+      partnerAlive: !!partner?.alive,
+      childrenAlive: children,
+      song: (this.bandKnows(p.band) & BIT.song) !== 0,
+      hut: this.hutAt(p.cell, p.band),
+    });
     return { value: moodValue(reasons), reasons };
+  }
+
+  /** Mood without the parts that need a look at others (for frequent checks). */
+  private quickMood(p: Person): number {
+    let v = 50;
+    if (p.hunger > 0.6) v -= 12;
+    if (p.thirst > 0.6) v -= 12;
+    if (p.sick > 0) v -= 15;
+    if (p.social > 0.7) v -= 10;
+    if (p.partner >= 0) v += 10;
+    const t = this.data.t;
+    for (const m of p.moods) if (m.until > t) v += m.v;
+    return clamp(v, 0, 100);
   }
 
   opinion(p: Person, id: number): number {
@@ -358,7 +478,7 @@ export class Life {
 
   bandSize(bandId: number): number {
     let n = 0;
-    for (const p of this.data.people) if (p.alive && p.band === bandId) n++;
+    for (const p of this.members(bandId)) if (p.alive && p.band === bandId) n++;
     return n;
   }
 
@@ -397,36 +517,73 @@ export class Life {
   /** Runs the simulation up to time T (in whole ticks). Returns the number of ticks run. */
   advanceTo(T: number, world: World, maxTicks = Infinity): number {
     let n = 0;
-    while (this.data.t + TICK <= T && n < maxTicks) {
-      this.data.t += TICK;
-      this.step(world);
+    for (;;) {
+      const k = this.stepTicks(this.data.t);
+      if (this.data.t + k * TICK > T || n >= maxTicks) break;
+      this.data.t += k * TICK;
+      this.step(world, k);
       n++;
     }
     return n;
+  }
+
+  /** Ticks in the next step: coarse steps during a time skip, aligned to whole 2-hour blocks. */
+  private stepTicks(t: number): number {
+    const until = this.data.coarseUntil;
+    if (until === undefined || t >= until) return 1;
+    return (t / TICK) % COARSE === 0 && t + COARSE * TICK <= until ? COARSE : 1;
+  }
+
+  /** True while a time skip runs. */
+  get skipping(): boolean {
+    return this.data.coarseUntil !== undefined && this.data.t < this.data.coarseUntil;
+  }
+
+  /** Ends a time skip early (or after rewinding into one). */
+  endSkip(): void {
+    if (this.data.coarseUntil !== undefined) this.data.coarseUntil = Math.min(this.data.coarseUntil, this.data.t);
+  }
+
+  get coarseUntil(): number | undefined {
+    return this.data.coarseUntil;
   }
 
   /** People without a group (data from older versions) join the nearest group or start one. */
   private ensureBands(world: World): void {
     if (this.bandsChecked) return;
     this.bandsChecked = true;
+    this.updateHerdCap(world);
     const lost = this.data.people.filter((p) => p.alive && !this.bandById.has(p.band)).sort((a, b) => a.id - b.id);
     for (const p of lost) {
       const near = this.nearestLeader(world, p.cell, world.kmPerCell * 6);
       if (near !== undefined) p.band = this.person(near)!.band;
       else p.band = this.newBand(p.id).id;
     }
+    if (lost.length) this.invalidateKnowledge();
   }
 
-  private step(world: World): void {
+  private step(world: World, k: number): void {
     this.ensureBands(world);
     const t = this.data.t;
     const tick = Math.round(t / TICK);
+    const prev = tick - k;
+    /** Did a period of `every` ticks (shifted by `offset`) end in this step? */
+    const crossed = (every: number, offset = 0) => Math.floor((tick + offset) / every) > Math.floor((prev + offset) / every);
+    this.bandStats = null;
+    this.memberCache = null;
     const people = this.data.people;
     const count = people.length; // babies born this step start next step
-    for (let i = 0; i < count; i++) if (people[i].alive) this.updatePerson(people[i], world, t, tick);
+    for (let i = 0; i < count; i++) {
+      const p = people[i];
+      if (!p.alive) continue;
+      this.updatePerson(p, world, t, k);
+      if (p.alive && Math.floor((tick + p.id) / TICKS_PER_DAY) > Math.floor((prev + p.id) / TICKS_PER_DAY)) this.personDaily(p, world, t);
+    }
 
-    // Who is where (awake people).
-    const byCell = new Map<number, Person[]>();
+    // Who is where (reusing the lists from the last step).
+    const byCell = this.byCell;
+    for (const list of byCell.values()) list.length = 0;
+    if (byCell.size > 400) byCell.clear();
     for (const p of people) {
       if (!p.alive) continue;
       let list = byCell.get(p.cell);
@@ -438,22 +595,30 @@ export class Life {
       if (!p.alive || p.sick <= 0) continue;
       for (const q of byCell.get(p.cell) ?? []) {
         if (q === p || !q.alive || q.sick > 0 || q.immune) continue;
-        if (this.rng.chance(0.006)) this.makeSick(q);
+        if (this.rng.chance(perStep(0.006, k))) this.makeSick(q);
       }
     }
-    this.socialize(world, t, byCell);
+    this.socialize(world, t, byCell, k);
 
-    if (tick % HERD_EVERY === 0) {
-      for (const h of this.data.herds) if (h.count > 0) this.updateHerd(h, world, t);
-      this.data.herds = this.data.herds.filter((h) => h.count > 0);
+    const herdSteps = Math.floor(tick / HERD_EVERY) - Math.floor(prev / HERD_EVERY);
+    if (k > 1 && herdSteps > 0) {
+      // Time skip: each herd moves every other period, twice as far (half the work).
+      const parity = Math.floor(tick / HERD_EVERY) % 2;
+      for (const h of this.data.herds) if (h.count > 0 && h.id % 2 === parity) this.updateHerd(h, world, t, 2 * herdSteps);
+      if (this.data.herds.some((h) => h.count <= 0)) this.data.herds = this.data.herds.filter((h) => h.count > 0);
+    } else {
+      for (let i = 0; i < herdSteps; i++) {
+        for (const h of this.data.herds) if (h.count > 0) this.updateHerd(h, world, t, 1);
+        this.data.herds = this.data.herds.filter((h) => h.count > 0);
+      }
     }
-    if (tick % TICKS_PER_DAY === 0) this.dailyWorld(world, t);
-    if (tick % 360 === 0) this.cleanFood(world, t);
+    if (crossed(TICKS_PER_DAY)) this.dailyWorld(world, t);
+    if (crossed(360)) this.cleanFood(world, t);
   }
 
   // ------------------------------------------------------------ people: basics
 
-  private addPerson(world: World, cell: number, rng: RandomSource, opts: { sex?: Sex; age?: [number, number]; band: number }): Person | null {
+  private addPerson(world: World, cell: number, rng: RandomSource, opts: { sex?: Sex; age?: [number, number]; band: number; know?: number }): Person | null {
     if (this.population() >= MAX_PEOPLE) return null;
     const s: Sex = opts.sex ?? (rng.chance(0.5) ? 'f' : 'm');
     const nameRng = new Rng(Math.floor(rng.next() * 0xffffffff));
@@ -490,6 +655,7 @@ export class Life {
       alive: true,
       log: [],
       flags: 0,
+      know: opts.know ?? 0,
     };
     this.log(p, 'created');
     this.data.people.push(p);
@@ -498,7 +664,7 @@ export class Life {
   }
 
   private newBand(leader: number): Band {
-    const band: Band = { id: this.data.nextId++, leader, founded: this.data.t };
+    const band: Band = { id: this.data.nextId++, leader, founded: this.data.t, food: 0 };
     this.data.bands.push(band);
     this.bandById.set(band.id, band);
     return band;
@@ -548,7 +714,12 @@ export class Life {
     p.chat = undefined;
     p.dest = undefined;
     this.log(p, 'died', { cause });
-    this.chron('death', { a: p.id, n: Math.floor(age), s: cause, ...(wasLeader ? { major: 1 as const } : {}) });
+    this.data.deaths = (this.data.deaths ?? 0) + 1;
+    // The chronicle names everyone while the world is small, later only notable people.
+    const notable = wasLeader || age >= 70 || p.log.some((l) => l.key === 'invented') || !['age', 'sickness', 'hunger', 'thirst', 'cold'].includes(cause);
+    if (notable || this.population() < SMALL_WORLD) this.chron('death', { a: p.id, n: Math.floor(age), s: cause, ...(wasLeader ? { major: 1 as const } : {}) });
+    this.invalidateKnowledge();
+    this.checkLostKnowledge(p.know);
     p.partner = -1;
     if (partner >= 0) {
       const q = this.person(partner);
@@ -575,6 +746,8 @@ export class Life {
       else if (this.siblings(q, dead)) [v, days] = [-18, 14];
       else if (this.opinion(q, dead.id) >= 40) [v, days, logged] = [-10, 8, false];
       if (v === 0) continue;
+      // Burial rites help the living to let go.
+      if (this.bandKnows(q.band) & BIT.burial) [v, days] = [Math.round(v * 0.7), Math.max(3, Math.round(days * 0.6))];
       this.addMood(q, 'grief', v, days, dead.id);
       if (logged) this.log(q, 'grief', { other: dead.id });
     }
@@ -598,6 +771,20 @@ export class Life {
     return localSolarHours(lon, sunLongitude((t % DAY) / DAY));
   }
 
+  /** The day's mean temperature (season and climate, not the hour): what plants and herds feel. */
+  private dayTemperature(world: World, cell: number, t: number): number {
+    const day = Math.floor(t / DAY);
+    if (day !== this.seasonDay) {
+      const t0 = day * DAY;
+      this.seasonDay = day;
+      this.seasonNow = seasonSignal((t0 % YEAR) / YEAR);
+      this.climateNow = world.globalTemperature(t0);
+    }
+    const planet = world.planet;
+    const hemisphere = Math.max(-1, Math.min(1, planet.positions[cell * 3 + 1] * 8));
+    return planet.temperature[cell] + planet.seasonAmplitude[cell] * hemisphere * this.seasonNow + this.climateNow;
+  }
+
   temperatureAt(world: World, cell: number, t: number): number {
     const season = seasonSignal((t % YEAR) / YEAR);
     return currentTemperature(world.planet, cell, season, this.localHours(world, cell, t)) + world.globalTemperature(t);
@@ -612,18 +799,18 @@ export class Life {
   private groupTogether(p: Person, world: World): boolean {
     let all = 0;
     let near = 0;
-    for (const q of this.data.people) {
+    for (const q of this.members(p.band)) {
       if (!q.alive || q === p || q.band !== p.band) continue;
       all++;
-      if (world.kmBetween(q.cell, p.cell) <= world.kmPerCell * 2.5) near++;
+      if (world.within(q.cell, p.cell, world.kmPerCell * 2.5)) near++;
     }
     return all === 0 || near >= all * 0.6;
   }
 
   // ------------------------------------------------------------ people: each step
 
-  private updatePerson(p: Person, world: World, t: number, tick: number): void {
-    const dt = TICK / DAY;
+  private updatePerson(p: Person, world: World, t: number, k: number): void {
+    const dt = (TICK * k) / DAY;
     if (p.chat && t >= p.chat.until) p.chat = undefined;
     if (p.feel && t >= p.feel.until) p.feel = undefined;
     if (p.awe !== undefined && t >= p.awe) p.awe = undefined;
@@ -658,7 +845,7 @@ export class Life {
     }
     if (st.water > 0.2) {
       danger = true;
-      if (st.water > 0.55 && this.rng.chance(lucky ? 0.05 : 0.2)) return this.die(p, 'flood');
+      if (st.water > 0.55 && this.rng.chance(perStep(lucky ? 0.05 : 0.2, k))) return this.die(p, 'flood');
       this.hurt(p, 0.08, 'flood');
       if (!(p.flags & 16)) {
         p.flags |= 16;
@@ -666,53 +853,58 @@ export class Life {
         this.addMood(p, 'fled', -10, 4);
       }
     }
-    if (st.storm > 0.6) this.hurt(p, 0.02 * st.storm, 'storm');
+    const sheltered = p.action === 'sleep' && this.hutAt(p.cell, p.band);
+    if (st.storm > 0.6) this.hurt(p, 0.02 * st.storm * (sheltered ? 0.3 : 1), 'storm');
     if (!danger) p.flags &= ~(8 | 16);
 
     // Needs.
     const appetite = age < 13 ? 0.75 : 1;
     p.hunger = Math.min(1, p.hunger + 0.42 * dt * appetite);
     p.thirst = Math.min(1, p.thirst + (st.raining ? 0 : 0.55 * dt * appetite));
-    if (st.raining) p.thirst = Math.max(0, p.thirst - 0.04);
-    p.energy = Math.max(0, Math.min(1, p.energy + (p.action === 'sleep' ? 2.4 : -0.85) * dt));
+    if (st.raining) p.thirst = Math.max(0, p.thirst - 0.04 * k);
+    p.energy = Math.max(0, Math.min(1, p.energy + (p.action === 'sleep' ? (sheltered ? 3 : 2.4) : -0.85) * dt));
     if (age >= 3) p.social = Math.min(1, p.social + 0.2 * dt);
     if (age < 3) {
       // Babies are fed by whoever looks after them.
       const carer = this.caretaker(p);
       if (carer && (carer.cell === p.cell || carer.next === p.cell)) {
-        p.hunger = Math.max(0, p.hunger - 0.03);
-        p.thirst = Math.max(0, p.thirst - 0.04);
+        p.hunger = Math.max(0, p.hunger - 0.03 * k);
+        p.thirst = Math.max(0, p.thirst - 0.04 * k);
       }
     }
 
     if (p.hunger >= 1) {
-      this.hurt(p, 0.16 * dt, 'hunger');
+      this.hurt(p, 0.12 * dt, 'hunger');
       if (!(p.flags & FLAG_STARVING)) {
         p.flags |= FLAG_STARVING;
         this.log(p, 'starving');
       }
     } else if (p.hunger < 0.5) p.flags &= ~FLAG_STARVING;
     if (p.thirst >= 1) {
-      this.hurt(p, 0.3 * dt, 'thirst');
+      this.hurt(p, 0.25 * dt, 'thirst');
       if (!(p.flags & FLAG_PARCHED)) {
         p.flags |= FLAG_PARCHED;
         this.log(p, 'parched');
       }
     } else if (p.thirst < 0.5) p.flags &= ~FLAG_PARCHED;
 
+    // Fire, clothes and huts let people stand the cold.
+    const know = this.bandKnows(p.band);
+    const coldLimit = -10 - (know & BIT.fire ? 6 : 0) - (know & BIT.clothing ? 10 : 0) - (sheltered ? 6 : 0);
     const temp = this.temperatureAt(world, p.cell, t);
-    if (temp < -10) {
-      this.hurt(p, ((-10 - temp) / 10) * 0.18 * dt, 'cold');
+    if (temp < coldLimit) {
+      this.hurt(p, ((coldLimit - temp) / 10) * 0.18 * dt, 'cold');
       if (!(p.flags & FLAG_FREEZING)) {
         p.flags |= FLAG_FREEZING;
         this.log(p, 'freezing');
       }
-    } else if (temp > -5) p.flags &= ~FLAG_FREEZING;
+    } else if (temp > coldLimit + 5) p.flags &= ~FLAG_FREEZING;
 
-    if (st.plague && !p.immune && p.sick <= 0 && this.rng.chance(0.03)) this.makeSick(p);
+    if (st.plague && !p.immune && p.sick <= 0 && this.rng.chance(perStep(0.03, k))) this.makeSick(p);
     if (p.sick > 0) {
-      this.hurt(p, 0.11 * dt, 'sickness');
-      p.sick -= TICK;
+      // Healing herbs make sickness milder.
+      this.hurt(p, 0.11 * dt * (know & BIT.herbs ? 0.5 : 1), 'sickness');
+      p.sick -= TICK * k;
       if (p.sick <= 0) {
         p.sick = 0;
         p.immune = true;
@@ -731,25 +923,33 @@ export class Life {
     // Doing things.
     if (danger && p.goal !== 'safety') {
       this.flee(p, world, t);
+    } else if (p.action === 'walk' && age >= 3 && p.goal !== 'safety' && p.thirst > 0.6 && this.hasWater(world, p.cell, false)) {
+      // Water right here: drink before walking on.
+      this.start(p, 'drink', t, 60, true);
     } else if (p.action === 'walk') {
-      const urgent = age >= 3 && ((p.thirst > 0.7 && p.goal !== 'water') || (p.hunger > 0.75 && p.goal !== 'food' && p.goal !== 'water'));
+      const away = p.goal === 'hunt' || p.goal === 'work';
+      const urgent =
+        age >= 3 &&
+        ((p.thirst > (away ? 0.5 : 0.7) && p.goal !== 'water') || (p.hunger > (away ? 0.6 : 0.75) && p.goal !== 'food' && p.goal !== 'water'));
       if (urgent) this.decide(p, world, t);
-      else this.walk(p, world, t, age);
+      else this.walk(p, world, t, age, k);
     } else if (p.action === 'gather') {
-      const bite = this.eat(world, p.cell, t, 0.012) * (lucky ? 1.5 : 1);
-      p.hunger = Math.max(0, p.hunger - bite * 9);
-      if (bite < 0.004 || p.hunger <= 0.02 || t >= p.actionUntil) this.decide(p, world, t);
+      // Stone tools and cooking make food go further; nobody takes more than they can eat.
+      const worth = 9 * (lucky ? 1.5 : 1) * (know & BIT.tools ? 1.2 : 1) * (know & BIT.fire ? 1.15 : 1);
+      const want = Math.min(0.012 * k, p.hunger / worth + 0.0005);
+      const take = this.eat(world, p.cell, t, want);
+      p.hunger = Math.max(0, p.hunger - take * worth);
+      if (take < Math.min(want, 0.004 * k) * 0.99 || p.hunger <= 0.02 || t >= p.actionUntil) this.decide(p, world, t);
     } else if (p.action === 'drink') {
-      p.thirst = Math.max(0, p.thirst - 0.4);
+      p.thirst = Math.max(0, p.thirst - 0.4 * k);
       if (p.thirst <= 0 || t >= p.actionUntil) this.decide(p, world, t);
     } else if (p.action === 'sleep') {
       if (t >= p.actionUntil || (p.energy >= 1 && this.isDay(world, p.cell, t))) this.decide(p, world, t);
       else if (age >= 3 && (p.thirst > 0.85 || p.hunger > 0.9)) this.decide(p, world, t);
     } else if (t >= p.actionUntil) {
-      this.decide(p, world, t);
+      if (WORK_ACTIONS.has(p.action)) this.finishWork(p, world, t);
+      if (p.alive) this.decide(p, world, t);
     }
-
-    if ((tick + p.id) % TICKS_PER_DAY === 0) this.personDaily(p, world, t);
   }
 
   private isDay(world: World, cell: number, t: number): boolean {
@@ -770,13 +970,22 @@ export class Life {
 
     // Needs come first; the group's place is the first choice, as the leader chose it well.
     const leader = this.leaderOf(p);
-    const groupCell = leader && world.kmBetween(leader.cell, p.cell) <= world.kmPerCell * 8 ? leader.cell : -1;
+    const groupCell = leader && world.within(leader.cell, p.cell, world.kmPerCell * 8) ? leader.cell : -1;
     if (p.thirst > 0.5) {
       if (this.hasWater(world, p.cell, st.raining)) return this.start(p, 'drink', t, 60);
-      if (groupCell >= 0 && this.waterScore(world, groupCell) > 0 && this.goTo(p, world, (c) => c === groupCell, 12, 'water')) return;
-      if (this.goTo(p, world, (c) => planet.fresh[c] !== FRESH_NONE, 18, 'water')) return;
+      const groupNear = groupCell >= 0 && world.within(groupCell, p.cell, world.kmPerCell * 2.5);
+      if (groupNear && this.waterScore(world, groupCell) > 0 && this.goTo(p, world, (c) => c === groupCell, 4, 'water')) return;
+      if (this.goTo(p, world, (c) => planet.fresh[c] !== FRESH_NONE || this.waterScore(world, c) > 0, 18, 'water')) return;
     }
     if (p.hunger > 0.45) {
+      // Meat and fish the group shares, at the camp.
+      const band = this.bandById.get(p.band);
+      const camp = leader ? leader.cell : p.cell;
+      if (band && band.food >= 1 && world.within(camp, p.cell, world.kmPerCell * 1.6)) {
+        band.food -= 1;
+        p.hunger = Math.max(0, p.hunger - 0.6 * (this.bandKnows(p.band) & BIT.fire ? 1.2 : 1));
+        return this.start(p, 'eat', t, 60);
+      }
       const here = this.foodAt(world, p.cell, t);
       if (here > 0.2) return this.start(p, 'gather', t, 180, true);
       if (groupCell >= 0 && groupCell !== p.cell && this.foodAt(world, groupCell, t) > 0.35 && this.goTo(p, world, (c) => c === groupCell, 12, 'food')) return;
@@ -793,8 +1002,8 @@ export class Life {
     }
     // On the way to a faraway new home (waiting for the others now and then).
     if (p.dest !== undefined) {
-      if (world.kmBetween(p.cell, p.dest) <= world.kmPerCell * 1.2) p.dest = undefined;
-      else if (!this.groupTogether(p, world)) return this.start(p, 'rest', t, 120, true);
+      if (world.within(p.cell, p.dest, world.kmPerCell * 1.2)) p.dest = undefined;
+      else if (this.isLeader(p) && !this.groupTogether(p, world)) return this.start(p, 'rest', t, 120, true);
       else if (this.goTo(p, world, (c) => c === p.dest, 40, 'wander')) return;
       else p.dest = undefined;
     }
@@ -804,9 +1013,13 @@ export class Life {
     if (guide && guide !== p && guide.cell !== p.cell && world.kmBetween(guide.cell, p.cell) > world.kmPerCell * reach) {
       if (this.goTo(p, world, (c) => c === guide.cell, 25, age < 13 ? 'family' : 'group')) return;
     }
-    // Leaders sometimes move on to a better place (always, when food runs short).
-    const short = p.hunger > 0.5 || this.foodAt(world, p.cell, t) < 0.15;
-    if (!leader && age >= 13 && (short || this.rng.chance(0.25)) && this.groupTogether(p, world)) {
+    // Work for the group by day (not when thirsty or hungry: work takes people away from water).
+    if (age >= 13 && p.task && p.task !== 'gather' && p.thirst < 0.35 && p.hunger < 0.45 && this.isDay(world, p.cell, t) && this.doTask(p, world, t, leader)) return;
+    // Leaders sometimes move on to a better place (always, when food runs short). With huts, they stay.
+    const settled = this.hutAt(p.cell, p.band);
+    const band = this.bandById.get(p.band);
+    const short = settled ? p.hunger > 0.7 && (band?.food ?? 0) < 1 && this.foodAt(world, p.cell, t) < 0.1 : p.hunger > 0.5 || this.foodAt(world, p.cell, t) < 0.15;
+    if (!leader && age >= 13 && (short || this.rng.chance(settled ? 0.03 : 0.25)) && this.groupTogether(p, world)) {
       const target = this.betterPlace(p, world, t, p.feel?.kind === 'courage' || short ? 7 : 4);
       if (target >= 0 && this.goTo(p, world, (c) => c === target, 8, 'wander')) return;
     }
@@ -845,7 +1058,7 @@ export class Life {
     }
     const leader = this.leaderOf(p);
     if (leader && this.ageOf(leader) >= 13) return leader;
-    for (const q of this.data.people) if (q.alive && q !== p && q.band === p.band && this.ageOf(q) >= 16) return q;
+    for (const q of this.members(p.band)) if (q.alive && q !== p && q.band === p.band && this.ageOf(q) >= 16) return q;
     return null;
   }
 
@@ -886,12 +1099,14 @@ export class Life {
     return best;
   }
 
+  /** Fresh water: a river, lake or spring here or next door, or small streams in damp land. */
   private waterScore(world: World, c: number): number {
     const planet = world.planet;
     if (planet.fresh[c] !== FRESH_NONE) return 0.6;
     for (let k = planet.neighborOffsets[c]; k < planet.neighborOffsets[c + 1]; k++) {
       if (planet.fresh[planet.neighbors[k]] !== FRESH_NONE) return 0.3;
     }
+    if (planet.moisture[c] >= 0.6 && planet.temperature[c] > -4 && planet.heightM[c] >= 0) return 0.15;
     return 0;
   }
 
@@ -926,13 +1141,24 @@ export class Life {
     return false;
   }
 
-  private walk(p: Person, world: World, t: number, age: number): void {
+  private walk(p: Person, world: World, t: number, age: number, k: number): void {
     if (p.next < 0) return this.arrive(p, world, t);
-    const km = Math.max(1, world.kmBetween(p.cell, p.next));
     const pace = age >= 3 && age < 9 ? 0.85 : age > 60 ? 0.8 : 1;
-    const speed = WALK_KM_PER_TICK * pace * (p.goal === 'safety' ? 1.7 : 1) * (p.sick > 0 ? 0.6 : 1) * (p.energy < 0.1 ? 0.6 : 1) * (p.pregnant ? 0.85 : 1);
-    p.progress += speed / km;
-    if (p.progress >= 1) {
+    const speed = WALK_KM_PER_TICK * k * pace * (p.goal === 'safety' ? 1.7 : 1) * (p.sick > 0 ? 0.6 : 1) * (p.energy < 0.1 ? 0.6 : 1) * (p.pregnant ? 0.85 : 1);
+    p.progress += speed / Math.max(1, world.kmBetween(p.cell, p.next));
+    // Long steps (time skip) can cross several cells.
+    while (p.progress >= 1 && p.next >= 0 && p.path.length > 0) {
+      const extra = (p.progress - 1) * Math.max(1, world.kmBetween(p.cell, p.next));
+      p.cell = p.next;
+      if (p.goal !== 'safety' && age >= 3 && p.thirst > 0.6 && this.hasWater(world, p.cell, false)) return this.start(p, 'drink', t, 60, true);
+      p.next = p.path.shift()!;
+      if (world.planet.heightM[p.next] < 0) {
+        p.next = -1;
+        break;
+      }
+      p.progress = extra / Math.max(1, world.kmBetween(p.cell, p.next));
+    }
+    if (p.progress >= 1 && p.next >= 0) {
       p.cell = p.next;
       p.progress = 0;
       p.next = p.path.shift() ?? -1;
@@ -987,15 +1213,25 @@ export class Life {
     const age = this.ageOf(p, t);
 
     // Growing old, and the dangers of the first years.
-    const yearly = age < 1 ? 0.03 : age < 5 ? 0.008 : age < 40 ? 0.002 : age < 50 ? 0.012 : age < 60 ? 0.04 : age < 70 ? 0.1 : age < 80 ? 0.22 : 0.4;
-    if (this.rng.chance((yearly / DAYS_PER_YEAR) * (p.luck !== undefined ? 0.5 : 1))) {
+    const yearly = age < 1 ? 0.03 : age < 5 ? 0.008 : age < 40 ? 0.002 : age < 50 ? 0.008 : age < 60 ? 0.03 : age < 70 ? 0.09 : age < 80 ? 0.2 : 0.4;
+    // Healing herbs save many small children.
+    const herbs = age < 5 && this.bandKnows(p.band) & BIT.herbs ? 0.6 : 1;
+    if (this.rng.chance((yearly / DAYS_PER_YEAR) * herbs * (p.luck !== undefined ? 0.5 : 1))) {
       this.die(p, age < 55 ? 'sickness' : 'age');
       return;
     }
-    // Coming of age: children take on some of their parents' views of others.
-    if (age >= 13 && age - 1 / DAYS_PER_YEAR < 13) this.inheritOpinions(p);
+    // Coming of age: children take on some of their parents' views of others, and what they know.
+    if (age >= 13 && age - 1 / DAYS_PER_YEAR < 13) {
+      this.inheritOpinions(p);
+      this.learnFromParents(p);
+    }
+    if (age >= 14) {
+      this.tryInvent(p, world, t, age);
+      p.task = this.chooseTask(p, world, age);
+    }
 
     if (p.sex === 'f' && !p.pregnant && p.partner >= 0) this.tryConceive(p, world, t, age);
+    if (p.partner < 0 && age >= 17 && age <= 35 && !this.isLeader(p) && this.rng.chance(0.012)) this.seekPartner(p, world);
 
     // A couple that cannot stand each other any more breaks up.
     if (p.partner >= 0) {
@@ -1031,14 +1267,16 @@ export class Life {
     const q = this.person(p.partner);
     if (!q?.alive || age < ADULT_AGE || age > 44) return;
     if (p.lastBirth !== undefined && t - p.lastBirth < 2 * YEAR) return;
-    if (world.kmBetween(p.cell, q.cell) > world.kmPerCell * 1.6) return;
+    if (!world.within(p.cell, q.cell, world.kmPerCell * 1.6)) return;
     const fertility = age < 20 ? 0.6 : age < 30 ? 1 : age < 35 ? 0.8 : age < 40 ? 0.5 : 0.2;
     const fed = p.hunger < 0.6 && p.thirst < 0.6 ? 1 : 0.35;
-    const group = clamp(1.25 - this.bandSize(p.band) / 40, 0.15, 1);
-    const world$ = clamp(1.25 - this.population() / 240, 0.1, 1);
+    // Small groups have more children (and are not easily wiped out), crowded ones fewer.
+    const size = this.bandSize(p.band);
+    const group = size < 12 ? 1.5 : clamp(1.25 - size / 40, 0.15, 1);
+    const world$ = clamp(1.2 - this.population() / 150, 0.06, 1);
     const mood = this.mood(p).value;
     const spirit = mood > 65 ? 1.15 : mood < 30 ? 0.7 : 1;
-    const chance = 0.02 * fertility * fed * group * world$ * spirit * (p.luck !== undefined ? 1.5 : 1);
+    const chance = 0.016 * fertility * fed * group * world$ * spirit * (p.luck !== undefined ? 1.5 : 1);
     if (this.rng.chance(chance)) p.pregnant = { father: q.id, due: t + PREGNANCY };
   }
 
@@ -1056,7 +1294,10 @@ export class Life {
     if (babies.length === 0) return;
     this.data.births = (this.data.births ?? 0) + babies.length;
     const first = (this.data.births ?? 0) === babies.length;
-    if (babies.length === 2) {
+    const record = first || this.population() < SMALL_WORLD || this.isLeader(mother) || (isLiving(father) && this.isLeader(father));
+    if (!record) {
+      // Not written down: the world has grown large.
+    } else if (babies.length === 2) {
       this.chron('twins', { a: babies[0].id, b: babies[1].id, c: mother.id, ...(first ? { major: 1 as const } : {}) });
     } else {
       this.chron('birth', { a: babies[0].id, b: mother.id, c: fatherId, ...(first ? { major: 1 as const } : {}) });
@@ -1072,7 +1313,16 @@ export class Life {
 
   private makeBaby(mother: Person, father: Someone | undefined, world: World, t: number): Person | null {
     if (this.population() >= MAX_PEOPLE) return null;
-    const sex: Sex = this.rng.chance(0.5) ? 'f' : 'm';
+    // Nature keeps the young of a group roughly balanced (small groups would die out otherwise).
+    let girls = 0;
+    let boys = 0;
+    for (const q of this.members(mother.band)) {
+      if (!q.alive || this.ageOf(q) >= 30) continue;
+      if (q.sex === 'f') girls++;
+      else boys++;
+    }
+    const boyChance = clamp(0.5 + (0.5 * (girls - boys)) / (girls + boys + 2), 0.25, 0.75);
+    const sex: Sex = this.rng.chance(boyChance) ? 'm' : 'f';
     const dad = father ?? mother;
     const baby: Person = {
       id: this.data.nextId++,
@@ -1106,6 +1356,7 @@ export class Life {
       alive: true,
       log: [],
       flags: 0,
+      know: 0,
     };
     this.log(baby, 'born', { other: mother.id, n: father ? father.id : undefined });
     this.data.people.push(baby);
@@ -1177,18 +1428,44 @@ export class Life {
     return o.mother === p.id || o.father === p.id || this.siblings(p, o);
   }
 
-  /** Too closely related to become a couple: parents, children, siblings, grandparents, aunts and uncles. */
+  /** Too closely related to become a couple: parents, children, brothers and sisters, grandparents. */
   isCloseKin(a: Someone, b: Someone): boolean {
     if (a.mother === b.id || a.father === b.id || b.mother === a.id || b.father === a.id) return true;
     if (this.siblings(a, b)) return true;
     const parents = (x: Someone) => [x.mother, x.father].filter((id) => id >= 0).map((id) => this.byId.get(id)).filter((y): y is Someone => !!y);
-    for (const pa of parents(a)) {
-      if (pa.mother === b.id || pa.father === b.id || this.siblings(pa, b)) return true;
-    }
-    for (const pb of parents(b)) {
-      if (pb.mother === a.id || pb.father === a.id || this.siblings(pb, a)) return true;
-    }
+    for (const pa of parents(a)) if (pa.mother === b.id || pa.father === b.id) return true;
+    for (const pb of parents(b)) if (pb.mother === a.id || pb.father === a.id) return true;
     return false;
+  }
+
+  /**
+   * Young people with nobody to marry in their own group sometimes go to a
+   * neighboring group to find a partner (as hunter-gatherers really did).
+   */
+  private seekPartner(p: Person, world: World): void {
+    const own = this.members(p.band).some((q) => q !== p && q.alive && q.band === p.band && q.partner < 0 && this.canCourt(p, q));
+    if (own) return;
+    let best: Band | null = null;
+    let bestKm = world.kmPerCell * 16;
+    for (const b of this.data.bands) {
+      if (b.id === p.band) continue;
+      const l = this.person(b.leader);
+      if (!l?.alive) continue;
+      const km = world.kmBetween(l.cell, p.cell);
+      if (km < bestKm && this.members(b.id).some((q) => q.alive && q.band === b.id && q.partner < 0 && this.canCourt(p, q))) {
+        bestKm = km;
+        best = b;
+      }
+    }
+    if (!best) return;
+    const leader = this.person(best.leader)!;
+    this.moveToBand(p, best.id);
+    p.dest = leader.cell;
+    p.next = -1;
+    p.path = [];
+    p.action = 'idle';
+    p.actionUntil = this.data.t;
+    this.log(p, 'emigrated', { n: 0 });
   }
 
   private canCourt(p: Person, q: Person, ignorePartner = false): boolean {
@@ -1196,7 +1473,7 @@ export class Life {
     if (!ignorePartner && (p.partner >= 0 || q.partner >= 0)) return false;
     const ap = this.ageOf(p);
     const aq = this.ageOf(q);
-    if (ap < ADULT_AGE || aq < ADULT_AGE || Math.abs(ap - aq) > 18) return false;
+    if (ap < ADULT_AGE || aq < ADULT_AGE || Math.abs(ap - aq) > 20) return false;
     return !this.isCloseKin(p, q);
   }
 
@@ -1229,6 +1506,7 @@ export class Life {
 
   /** Moves someone (and their young children) to another group. */
   private moveToBand(p: Person, band: number): void {
+    this.invalidateKnowledge();
     const old = p.band;
     for (const q of this.data.people) {
       if (q.alive && q.band === old && (q === p || ((q.mother === p.id || q.father === p.id) && this.ageOf(q) < 13))) q.band = band;
@@ -1249,12 +1527,16 @@ export class Life {
   }
 
   /** People close to each other talk, play, flirt, quarrel and comfort each other. */
-  private socialize(world: World, t: number, byCell: Map<number, Person[]>): void {
+  private socialize(world: World, t: number, byCell: Map<number, Person[]>, k: number): void {
     const planet = world.planet;
     const free = (q: Person) => q.alive && !q.chat && q.action !== 'sleep' && q.action !== 'carried' && q.goal !== 'safety' && this.ageOf(q, t) >= 3;
     for (const p of this.data.people) {
       if (!free(p)) continue;
-      if (!this.rng.chance(0.045 * (0.6 + p.social))) continue;
+      const base = 0.045 * (0.6 + p.social);
+      const chance = perStep(base, k);
+      if (!this.rng.chance(chance)) continue;
+      // Long steps: one talk stands for the several that would have happened.
+      this.weight = (base * k) / chance;
       // Someone nearby, preferably family, a partner or a friend.
       let total = 0;
       const options: [Person, number][] = [];
@@ -1279,11 +1561,12 @@ export class Life {
           break;
         }
       }
-      this.interact(p, q, t);
+      this.interact(p, q, t, k);
     }
   }
 
-  private interact(p: Person, q: Person, t: number): void {
+  private interact(p: Person, q: Person, t: number, k: number): void {
+    const w = this.weight;
     const ap = this.ageOf(p, t);
     const aq = this.ageOf(q, t);
     const kindP = p.traits[T_KIND];
@@ -1299,7 +1582,7 @@ export class Life {
       if (!this.grieving(p) && attraction > 5) kind = 'flirt';
     }
     if (kind !== 'play' && kind !== 'comfort') {
-      const mood = this.mood(p).value;
+      const mood = this.quickMood(p);
       const quarrel =
         0.03 +
         p.traits[T_AGGRESSIVE] / 350 +
@@ -1311,26 +1594,31 @@ export class Life {
         (lucky ? 0.03 : 0);
       if (this.rng.chance(quarrel)) kind = 'quarrel';
     }
-    const until = t + 3 * TICK;
+    const until = t + (k === 1 ? 3 : 1) * TICK * k;
     p.chat = { kind, with: q.id, until };
     q.chat = { kind, with: p.id, until };
-    const warmth = 0.6 + kindP / 125;
+    if (kind !== 'quarrel') {
+      // Talking passes knowledge on.
+      if (countKnown(p.know) >= countKnown(q.know)) this.tryTeach(p, q, 0.04 * w);
+      else this.tryTeach(q, p, 0.04 * w);
+    }
+    const warmth = (0.6 + kindP / 125) * w;
     switch (kind) {
       case 'talk':
         this.addOp(p, q.id, this.rng.range(1, 4) * warmth * (lucky ? 1.5 : 1));
-        this.addOp(q, p.id, this.rng.range(1, 4) * (0.6 + q.traits[T_KIND] / 125));
+        this.addOp(q, p.id, this.rng.range(1, 4) * (0.6 + q.traits[T_KIND] / 125) * w);
         p.social = Math.max(0, p.social - 0.35);
         q.social = Math.max(0, q.social - 0.35);
         break;
       case 'play':
-        this.addOp(p, q.id, 3);
-        this.addOp(q, p.id, 3);
+        this.addOp(p, q.id, 3 * w);
+        this.addOp(q, p.id, 3 * w);
         p.social = Math.max(0, p.social - 0.4);
         q.social = Math.max(0, q.social - 0.4);
         break;
       case 'love':
-        this.addOp(p, q.id, 2);
-        this.addOp(q, p.id, 2);
+        this.addOp(p, q.id, 2 * w);
+        this.addOp(q, p.id, 2 * w);
         p.social = Math.max(0, p.social - 0.4);
         q.social = Math.max(0, q.social - 0.4);
         break;
@@ -1341,8 +1629,8 @@ export class Life {
         q.social = Math.max(0, q.social - 0.4);
         break;
       case 'flirt': {
-        this.addOp(p, q.id, this.rng.range(4, 9) + (lucky ? 4 : 0));
-        const back = this.canCourt(q, p) ? this.rng.range(2, 7) * (this.opinion(q, p.id) > -10 ? 1 : 0.3) : 0;
+        this.addOp(p, q.id, (this.rng.range(4, 9) + (lucky ? 4 : 0)) * w);
+        const back = this.canCourt(q, p) ? this.rng.range(2, 7) * (this.opinion(q, p.id) > -10 ? 1 : 0.3) * w : 0;
         this.addOp(q, p.id, back);
         p.social = Math.max(0, p.social - 0.3);
         if (this.opinion(p, q.id) >= 60 && this.opinion(q, p.id) >= 50 && this.canCourt(p, q)) this.becomeCouple(p, q);
@@ -1461,6 +1749,404 @@ export class Life {
         this.chron('population', { n: mark, major: 1 });
       }
     }
+    this.dailyCamps(t, members);
+    this.dailySpecies(world, t);
+  }
+
+  // ------------------------------------------------------------ knowledge
+
+  /** What a group knows: everything any living member knows. */
+  bandKnows(bandId: number): number {
+    if (!this.bandKnowCache) {
+      const cache = new Map<number, number>();
+      for (const p of this.data.people) if (p.alive) cache.set(p.band, (cache.get(p.band) ?? 0) | p.know);
+      this.bandKnowCache = cache;
+    }
+    return this.bandKnowCache.get(bandId) ?? 0;
+  }
+
+  /** Everything known by anyone alive. */
+  worldKnows(): number {
+    let m = 0;
+    for (const p of this.data.people) if (p.alive) m |= p.know;
+    return m;
+  }
+
+  private invalidateKnowledge(): void {
+    this.bandKnowCache = null;
+    this.memberCache = null;
+    this.bandStats = null;
+  }
+
+  /** The living members of a group (rebuilt each step). */
+  private members(bandId: number): Person[] {
+    if (!this.memberCache) {
+      const map = new Map<number, Person[]>();
+      for (const p of this.data.people) {
+        if (!p.alive) continue;
+        let list = map.get(p.band);
+        if (!list) map.set(p.band, (list = []));
+        list.push(p);
+      }
+      this.memberCache = map;
+    }
+    return this.memberCache.get(bandId) ?? [];
+  }
+
+  private stats(bandId: number): { sick: boolean; hunger: number; size: number } {
+    if (!this.bandStats) {
+      const map = new Map<number, { sick: boolean; hunger: number; size: number }>();
+      for (const p of this.data.people) {
+        if (!p.alive) continue;
+        let s = map.get(p.band);
+        if (!s) map.set(p.band, (s = { sick: false, hunger: 0, size: 0 }));
+        s.size++;
+        s.hunger += p.hunger;
+        if (p.sick > 0) s.sick = true;
+      }
+      for (const s of map.values()) s.hunger /= Math.max(1, s.size);
+      this.bandStats = map;
+    }
+    return this.bandStats.get(bandId) ?? { sick: false, hunger: 0, size: 0 };
+  }
+
+  /** When the last one who knew something dies, the knowledge is lost. */
+  private checkLostKnowledge(mask: number): void {
+    if (!mask) return;
+    const still = this.worldKnows();
+    for (const id of INVENTION_IDS) {
+      if (mask & BIT[id] && !(still & BIT[id])) this.chron('lost', { s: id, major: 1 });
+    }
+  }
+
+  private learn(p: Person, id: InventionId): void {
+    p.know |= BIT[id];
+    this.invalidateKnowledge();
+  }
+
+  private learnFromParents(child: Person): void {
+    for (const pid of [child.mother, child.father]) {
+      const parent = pid >= 0 ? this.person(pid) : undefined;
+      if (!parent?.alive) continue;
+      for (const id of INVENTION_IDS) {
+        if (parent.know & BIT[id] && !(child.know & BIT[id]) && this.rng.chance(0.7)) this.learn(child, id);
+      }
+    }
+  }
+
+  /** Passes one piece of knowledge from teacher to learner (if the learner is ready for it). */
+  private tryTeach(teacher: Person, learner: Person, base: number): boolean {
+    const open = teacher.know & ~learner.know;
+    if (!open || this.ageOf(learner) < 4) return false;
+    const ready = INVENTION_IDS.filter((id) => open & BIT[id] && INVENTIONS[id].needs.every((n) => learner.know & BIT[n]));
+    if (ready.length === 0) return false;
+    const id = ready[this.rng.int(0, ready.length - 1)];
+    const song = this.bandKnows(teacher.band) & BIT.song ? 2 : 1;
+    const whispered = teacher.teacher !== undefined && teacher.teacher > this.data.t ? 4 : 1;
+    const young = this.ageOf(learner) < 20 ? 1.5 : 1;
+    const mind = 0.5 + learner.traits[T_CLEVER] / 100;
+    if (!this.rng.chance(Math.min(0.9, base * song * whispered * young * mind))) return false;
+    this.learn(learner, id);
+    this.log(learner, 'learned', { other: teacher.id, n: INVENTION_IDS.indexOf(id) });
+    return true;
+  }
+
+  private circumstances(p: Person, world: World, t: number): Circumstances {
+    const planet = world.planet;
+    let stone = stony(planet.biome[p.cell]);
+    let water = planet.fresh[p.cell] !== FRESH_NONE;
+    let flames = false;
+    for (let k = planet.neighborOffsets[p.cell]; k < planet.neighborOffsets[p.cell + 1]; k++) {
+      const n = planet.neighbors[k];
+      if (stony(planet.biome[n])) stone = true;
+      if (planet.fresh[n] !== FRESH_NONE || planet.heightM[n] < 0) water = true;
+      const st = world.cellState(n, t);
+      if (st.burning || st.burnt) flames = true;
+    }
+    const here = world.cellState(p.cell, t);
+    const stats = this.stats(p.band);
+    return {
+      stone,
+      water,
+      forest: foresty(planet.biome[p.cell]),
+      flames: flames || here.burning || here.burnt,
+      temperature: this.temperatureAt(world, p.cell, t),
+      sickness: stats.sick,
+      hunger: stats.hunger,
+      weather: here.raining || here.storm > 0.3,
+      mourning: p.moods.some((m) => m.key === 'grief' && m.until > t),
+    };
+  }
+
+  /** Once a day an adult may have an idea: need, opportunity, the person and chance. */
+  private tryInvent(p: Person, world: World, t: number, age: number): void {
+    const groupKnows = this.bandKnows(p.band);
+    const options = nextSteps(p.know).filter((id) => !(groupKnows & BIT[id]));
+    if (options.length === 0) return;
+    const mind = 0.4 + (p.traits[T_CLEVER] + p.traits[T_CURIOUS]) / 125;
+    const experience = age >= 20 && age <= 55 ? 1.2 : 1;
+    // A group has ideas faster than one person, but not in proportion to its size.
+    const crowd = 1 / Math.sqrt(Math.max(1, this.stats(p.band).size * 0.6));
+    const tinker = p.task === 'tinker' ? 2.5 : 1;
+    const luck = p.luck !== undefined ? 2 : 1;
+    const c = this.circumstances(p, world, t);
+    for (const id of options) {
+      const chance = (INVENTIONS[id].rate / DAYS_PER_YEAR) * circumstanceFactor(id, c) * mind * experience * tinker * luck * crowd;
+      if (this.rng.chance(chance)) {
+        this.invent(p, id);
+        return;
+      }
+    }
+  }
+
+  private invent(p: Person, id: InventionId): void {
+    const again = (this.data.everKnown & BIT[id]) !== 0;
+    this.learn(p, id);
+    this.data.everKnown |= BIT[id];
+    this.log(p, 'invented', { n: INVENTION_IDS.indexOf(id) });
+    this.addMood(p, 'invented', 15, 30);
+    this.chron('invention', { a: p.id, s: id, ...(again ? { n: 1 } : {}), major: 1 });
+  }
+
+  // ------------------------------------------------------------ work
+
+  /** Need of the group × talent × character, with some chance. */
+  private chooseTask(p: Person, world: World, age: number): Task {
+    const tr = p.traits;
+    const know = p.know;
+    const group = this.bandKnows(p.band);
+    const band = this.bandById.get(p.band);
+    const stats = this.stats(p.band);
+    const hungry = band ? band.food < stats.size * 0.6 : false;
+    const leader = this.leaderOf(p) ?? p;
+    const fit = age >= 16 && age <= 50 ? 1 : 0.3;
+    const scores: [Task, number][] = [['gather', 1]];
+    if (know & (BIT.spear | BIT.bow)) scores.push(['hunt', (hungry ? 1.6 : 0.5) * (0.5 + tr[T_BRAVE] / 100) * fit]);
+    if (know & BIT.fishing && this.waterScore(world, leader.cell) > 0) scores.push(['fish', (hungry ? 1.5 : 0.5) * (0.5 + tr[T_DILIGENT] / 100)]);
+    if (group & BIT.shelter && this.hutsWanted(p.band, leader.cell) > 0) scores.push(['build', 1.7 * (0.5 + tr[T_DILIGENT] / 100) * fit]);
+    if (group & BIT.herbs && stats.sick) scores.push(['heal', 2 * (0.4 + tr[T_KIND] / 100)]);
+    const teacher = p.teacher !== undefined && p.teacher > this.data.t;
+    if (know && (teacher || this.someoneToTeach(p))) scores.push(['teach', (teacher ? 4 : 0.7) * (0.4 + tr[T_KIND] / 100 + tr[T_CLEVER] / 200)]);
+    if (tr[T_CURIOUS] > 55) scores.push(['tinker', (tr[T_CURIOUS] / 100) * 0.8]);
+    if (group & BIT.fire && !this.members(p.band).some((q) => q !== p && q.alive && q.band === p.band && q.task === 'fire')) {
+      scores.push(['fire', age > 55 ? 1.5 : 0.7]);
+    }
+    let best: Task = 'gather';
+    let bestScore = -Infinity;
+    for (const [task, score] of scores) {
+      const v = score * (0.7 + this.rng.next() * 0.6);
+      if (v > bestScore) {
+        bestScore = v;
+        best = task;
+      }
+    }
+    return best;
+  }
+
+  private someoneToTeach(p: Person): boolean {
+    for (const q of this.members(p.band)) {
+      if (!q.alive || q === p || q.band !== p.band) continue;
+      const age = this.ageOf(q);
+      if (age >= 4 && age < 25 && p.know & ~q.know) return true;
+    }
+    return false;
+  }
+
+  /** Starts the person's work (or walks there). False if there is nothing to do now. */
+  private doTask(p: Person, world: World, t: number, leader: Person | null): boolean {
+    const camp = leader ? leader.cell : p.cell;
+    const near = (cell: number, cells: number) => world.within(cell, p.cell, world.kmPerCell * cells);
+    switch (p.task) {
+      case 'hunt': {
+        let prey: Herd | undefined;
+        let best = world.kmPerCell * 3;
+        for (const h of this.gameNear(p.band, camp, world, t)) {
+          if (h.count <= 0 || SPECIES[h.species].predator || !world.within(h.cell, camp, best)) continue;
+          const km = world.kmBetween(h.cell, camp);
+          if (km < best) {
+            best = km;
+            prey = h;
+          }
+        }
+        if (!prey) return false;
+        p.aim = prey.id;
+        if (near(prey.cell, 1.2)) {
+          this.start(p, 'hunt', t, 120, true);
+          return true;
+        }
+        const target = prey.cell;
+        return this.goTo(p, world, (c) => c === target, 4, 'hunt');
+      }
+      case 'fish':
+        if (this.waterScore(world, p.cell) > 0 || this.coastal(world, p.cell)) {
+          this.start(p, 'fish', t, 180, true);
+          return true;
+        }
+        return this.goTo(p, world, (c) => this.waterScore(world, c) > 0 && near(c, 3), 4, 'work');
+      case 'build':
+        if (this.hutsWanted(p.band, camp) <= 0) return false;
+        if (p.cell === camp) {
+          this.start(p, 'build', t, 180, true);
+          return true;
+        }
+        return this.goTo(p, world, (c) => c === camp, 10, 'work');
+      case 'heal': {
+        const sick = this.members(p.band).find((q) => q.alive && q !== p && q.band === p.band && q.sick > 0 && near(q.cell, 3));
+        if (!sick) return false;
+        p.aim = sick.id;
+        if (sick.cell === p.cell) {
+          this.start(p, 'heal', t, 120);
+          return true;
+        }
+        const target = sick.cell;
+        return this.goTo(p, world, (c) => c === target, 5, 'work');
+      }
+      case 'teach': {
+        const pupil = this.members(p.band).find((q) => q.alive && q !== p && q.band === p.band && this.ageOf(q) >= 4 && this.ageOf(q) < 25 && p.know & ~q.know && near(q.cell, 2));
+        if (!pupil) return false;
+        p.aim = pupil.id;
+        if (pupil.cell === p.cell) {
+          this.start(p, 'teach', t, 90);
+          p.chat = { kind: 'talk', with: pupil.id, until: t + 90 };
+          return true;
+        }
+        const target = pupil.cell;
+        return this.goTo(p, world, (c) => c === target, 4, 'work');
+      }
+      case 'fire':
+        if (p.cell !== camp) return this.goTo(p, world, (c) => c === camp, 10, 'work');
+        this.start(p, 'fire', t, 240);
+        return true;
+      case 'tinker':
+        this.start(p, 'tinker', t, 180, true);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** The result of a piece of work. */
+  private finishWork(p: Person, world: World, t: number): void {
+    const band = this.bandById.get(p.band);
+    const know = this.bandKnows(p.band);
+    switch (p.action) {
+      case 'hunt': {
+        const prey = p.aim !== undefined ? this.herd(p.aim) : undefined;
+        if (!prey || prey.count <= 0 || !world.within(prey.cell, p.cell, world.kmPerCell * 1.5)) return;
+        prey.fear = t;
+        const speed = prey.genes[2];
+        const chance = 0.25 * (p.know & BIT.bow ? 1.6 : 1) * (0.6 + p.traits[T_BRAVE] / 100) * (prey.species === 'mammoth' ? 0.6 : 1) * (1.3 - speed * 0.6);
+        if (this.rng.chance(chance)) {
+          prey.count -= 1;
+          const meat = MEAT[prey.species] * (0.6 + 0.8 * prey.genes[0]);
+          if (band) band.food += meat * (know & BIT.fire ? 1.2 : 1);
+          p.hunger = Math.max(0, p.hunger - 0.4);
+          this.log(p, 'hunted', { n: SPECIES_IDS.indexOf(prey.species) });
+        } else if ((prey.species === 'mammoth' || prey.species === 'bison') && this.rng.chance(0.04)) {
+          this.hurt(p, 0.3, 'hunt');
+        }
+        return;
+      }
+      case 'fish':
+        if (band && this.rng.chance(0.6)) band.food += 1 + p.traits[T_DILIGENT] / 100;
+        return;
+      case 'build': {
+        const camp = this.leaderOf(p)?.cell ?? p.cell;
+        let hut = this.data.structures.find((s) => s.kind === 'hut' && s.band === p.band && s.cell === camp && s.built < 1);
+        if (!hut && this.hutsWanted(p.band, camp) > 0) hut = this.addStructure('hut', camp, p.band, 0);
+        if (hut) {
+          hut.built = Math.min(1, hut.built + 0.35 * (0.6 + p.traits[T_DILIGENT] / 100));
+          hut.used = t;
+        }
+        return;
+      }
+      case 'heal': {
+        const sick = p.aim !== undefined ? this.person(p.aim) : undefined;
+        if (sick?.alive && sick.cell === p.cell) {
+          sick.sick = Math.max(0, sick.sick - 1.5 * DAY);
+          sick.health = Math.min(1, sick.health + 0.1);
+          this.addOp(sick, p.id, 6);
+        }
+        return;
+      }
+      case 'teach': {
+        const pupil = p.aim !== undefined ? this.person(p.aim) : undefined;
+        if (pupil?.alive && pupil.cell === p.cell) this.tryTeach(p, pupil, 0.35);
+        return;
+      }
+      case 'fire': {
+        const fire = this.data.structures.find((s) => s.kind === 'fire' && s.band === p.band && s.cell === p.cell);
+        if (fire) fire.used = t;
+        else if (know & BIT.fire) this.addStructure('fire', p.cell, p.band, 1);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** Herds within reach of a camp (looked up once per step and group). */
+  private gameNear(band: number, camp: number, world: World, t: number): Herd[] {
+    const cached = this.gameCache.get(band);
+    if (cached && cached.t === t && cached.camp === camp) return cached.herds.filter((h) => h.count > 0);
+    const herds = this.data.herds.filter((h) => h.count > 0 && !SPECIES[h.species].predator && world.within(h.cell, camp, world.kmPerCell * 4));
+    this.gameCache.set(band, { t, camp, herds });
+    return herds;
+  }
+
+  private coastal(world: World, cell: number): boolean {
+    const planet = world.planet;
+    for (let k = planet.neighborOffsets[cell]; k < planet.neighborOffsets[cell + 1]; k++) if (planet.heightM[planet.neighbors[k]] < 0) return true;
+    return false;
+  }
+
+  // ------------------------------------------------------------ camps
+
+  private addStructure(kind: Structure['kind'], cell: number, band: number, built: number): Structure {
+    const st: Structure = {
+      id: this.data.nextId++,
+      kind,
+      cell,
+      spot: kind === 'fire' ? [this.rng.range(-3, 3), this.rng.range(-3, 3)] : [this.rng.range(-11, 11), this.rng.range(-11, 11)],
+      band,
+      built,
+      used: this.data.t,
+    };
+    this.data.structures.push(st);
+    return st;
+  }
+
+  /** A finished hut of this group in this place. */
+  private hutAt(cell: number, band: number): boolean {
+    for (const s of this.data.structures) if (s.kind === 'hut' && s.cell === cell && s.band === band && s.built >= 1) return true;
+    return false;
+  }
+
+  /** How many more huts the group wants at its camp (one per three people). */
+  private hutsWanted(band: number, camp: number): number {
+    if (!(this.bandKnows(band) & BIT.shelter)) return 0;
+    let have = 0;
+    for (const s of this.data.structures) if (s.kind === 'hut' && s.cell === camp && s.band === band) have++;
+    return Math.ceil(this.stats(band).size / 3) - have;
+  }
+
+  /** Fireplaces at camps, shared food that spoils, abandoned places that fall apart. */
+  private dailyCamps(t: number, members: Map<number, Person[]>): void {
+    for (const band of this.data.bands) {
+      const know = this.bandKnows(band.id);
+      band.food *= know & BIT.pottery ? 0.96 : 0.88;
+      if (band.food < 0.05) band.food = 0;
+      const leader = this.person(band.leader);
+      if (!leader?.alive || leader.action === 'walk') continue;
+      const camp = leader.cell;
+      if (know & BIT.fire && !this.data.structures.some((s) => s.kind === 'fire' && s.cell === camp)) this.addStructure('fire', camp, band.id, 1);
+      for (const s of this.data.structures) if (s.cell === camp && s.band === band.id) s.used = t;
+      // Huts nearby that another group left are taken over.
+      for (const s of this.data.structures) if (s.cell === camp && s.band !== band.id && !members.has(s.band)) s.band = band.id;
+    }
+    const keep = this.data.structures.filter((s) => t - s.used < (s.kind === 'fire' ? 1 : 4) * YEAR);
+    if (keep.length > MAX_STRUCTURES) keep.splice(0, keep.length - MAX_STRUCTURES);
+    this.data.structures = keep;
   }
 
   private toArchive(p: Person): ArchivedPerson {
@@ -1479,7 +2165,8 @@ export class Life {
       band: p.band,
       cell: p.cell,
       spot: [p.spot[0], p.spot[1]],
-      log: p.log.filter((l) => MAJOR_LOG.has(l.key)).slice(-14),
+      log: p.log.filter((l) => MAJOR_LOG.has(l.key)).slice(-12),
+      know: p.know,
     };
   }
 
@@ -1506,6 +2193,7 @@ export class Life {
       if (q.mother === p.id || q.father === p.id || (partner && (q.mother === partner.id || q.father === partner.id))) movers.push(q);
     }
     const newBand = this.newBand(p.id);
+    this.invalidateKnowledge();
     for (const q of movers) {
       q.band = newBand.id;
       q.next = -1;
@@ -1545,7 +2233,7 @@ export class Life {
           const water = this.waterScore(world, n);
           const food = this.capacity(world, n, t);
           if (water === 0 || food < 0.3) continue;
-          if (others.some((o) => world.kmBetween(o, n) < world.kmPerCell * 5)) continue;
+          if (others.some((o) => world.within(o, n, world.kmPerCell * 5))) continue;
           const s = food * 1.5 + water + this.rng.next() * 0.3;
           if (s > bestScore) {
             bestScore = s;
@@ -1568,7 +2256,7 @@ export class Life {
     if (cap <= 0) return 0;
     const st = world.cellState(cell, t);
     cap *= 0.15 + 0.85 * st.veg;
-    const temp = this.temperatureAt(world, cell, t);
+    const temp = this.dayTemperature(world, cell, t);
     cap *= temp < -2 ? 0.3 : temp < 6 ? 0.65 : 1;
     if (st.bounty > 0) cap = Math.min(1.6, cap * (1 + st.bounty) + 0.3 * st.bounty);
     return cap;
@@ -1599,6 +2287,13 @@ export class Life {
 
   // ------------------------------------------------------------ animals
 
+  /** The land carries about one herd per twenty land cells. */
+  private updateHerdCap(world: World): void {
+    let land = 0;
+    for (let c = 0; c < world.planet.cellCount; c++) if (world.planet.heightM[c] >= 0) land++;
+    this.herdCap = clamp(Math.round(land / 20), 60, MAX_HERDS);
+  }
+
   private spawnInitialHerds(world: World): void {
     const planet = world.planet;
     let land = 0;
@@ -1623,14 +2318,107 @@ export class Life {
     }
   }
 
-  private addHerd(species: SpeciesId, cell: number, count: number): Herd | null {
+  private addHerd(species: SpeciesId, cell: number, count: number, genes?: [number, number, number], kind?: number): Herd | null {
     if (this.data.herds.length >= MAX_HERDS) return null;
-    const h: Herd = { id: this.data.nextId++, species, count, cell, next: -1, progress: 0, hunger: 0.2, bornYear: dateFromMinutes(this.data.t).year, prey: -1 };
+    const g: [number, number, number] = genes ? [genes[0], genes[1], genes[2]] : [0.5 + this.rng.range(-0.03, 0.03), 0.5 + this.rng.range(-0.03, 0.03), 0.5 + this.rng.range(-0.03, 0.03)];
+    const h: Herd = {
+      id: this.data.nextId++,
+      species,
+      count,
+      cell,
+      next: -1,
+      progress: 0,
+      hunger: 0.2,
+      bornYear: dateFromMinutes(this.data.t).year,
+      prey: -1,
+      genes: g,
+      kind: kind ?? this.baseKind(species),
+    };
     this.data.herds.push(h);
     return h;
   }
 
-  private updateHerd(h: Herd, world: World, t: number): void {
+  // ------------------------------------------------------------ species and evolution
+
+  get species(): readonly SpeciesRecord[] {
+    return this.data.species;
+  }
+
+  speciesRecord(id: number): SpeciesRecord | undefined {
+    return this.data.species.find((r) => r.id === id);
+  }
+
+  private newSpecies(base: SpeciesId, prefix: string, genes: [number, number, number], parent?: number): SpeciesRecord {
+    const rec: SpeciesRecord = { id: this.data.nextId++, base, prefix, genes: [genes[0], genes[1], genes[2]], born: this.data.t };
+    if (parent !== undefined) rec.parent = parent;
+    this.data.species.push(rec);
+    return rec;
+  }
+
+  /** The original species of a kind (brought back if it had died out). */
+  private baseKind(base: SpeciesId): number {
+    let rec = this.data.species.find((r) => r.base === base && r.prefix === '');
+    if (!rec) rec = this.newSpecies(base, '', [0.5, 0.5, 0.5]);
+    rec.extinct = undefined;
+    return rec.id;
+  }
+
+  /** Thick fur lets animals stand more cold (and less heat). */
+  private feltTemperature(h: Herd, temperature: number): number {
+    return temperature + (h.genes[1] - 0.5) * 16;
+  }
+
+  /** Young are like their parents with small changes; what suits the place survives better. */
+  private evolve(h: Herd, world: World, t: number): void {
+    const temp = world.planet.temperature[h.cell] + world.globalTemperature(t);
+    const hunted = h.fear !== undefined && t - h.fear < 2 * YEAR;
+    const opt: [number, number, number] = [
+      clamp(0.5 + (8 - temp) / 50 - (h.hunger > 0.5 ? 0.15 : 0), 0.05, 0.95),
+      clamp(0.5 + (8 - temp) / 30, 0.02, 0.98),
+      SPECIES[h.species].predator ? 0.6 : hunted ? 0.78 : 0.45,
+    ];
+    for (let i = 0; i < 3; i++) h.genes[i] = clamp(h.genes[i] + (opt[i] - h.genes[i]) * SELECTION + this.rng.range(-0.015, 0.015), 0, 1);
+  }
+
+  /** Every five years: new species where herds have changed a lot, and species that died out. */
+  private dailySpecies(world: World, t: number): void {
+    const year = Math.floor(t / YEAR);
+    if (Math.floor((t - DAY) / YEAR) === year || year % 5 !== 0) return;
+    const byKind = new Map<number, Herd[]>();
+    for (const h of this.data.herds) {
+      if (h.count <= 0) continue;
+      let list = byKind.get(h.kind);
+      if (!list) byKind.set(h.kind, (list = []));
+      list.push(h);
+    }
+    const alive = this.data.species.filter((r) => r.extinct === undefined).length;
+    for (const rec of [...this.data.species]) {
+      if (rec.extinct !== undefined) continue;
+      const herds = byKind.get(rec.id) ?? [];
+      if (herds.length === 0) {
+        rec.extinct = t;
+        this.chron('speciesGone', { n: rec.id, major: 1 });
+        continue;
+      }
+      if (alive >= 40) continue;
+      const far = herds.find((h) => geneDistance(h.genes, rec.genes) > SPECIATION);
+      if (!far) continue;
+      const group = herds.filter((h) => geneDistance(h.genes, far.genes) < 0.12);
+      const mean: [number, number, number] = [0, 0, 0];
+      for (const h of group) for (let i = 0; i < 3; i++) mean[i] += h.genes[i] / group.length;
+      const prefix = genePrefix(mean, rec.genes);
+      const same = this.data.species.find((r) => r.extinct === undefined && r.base === rec.base && r.prefix === prefix);
+      const target = same ?? this.newSpecies(rec.base, prefix, mean, rec.id);
+      for (const h of group) h.kind = target.id;
+      if (!same) {
+        const near = this.nearestLeader(world, far.cell, 1500);
+        this.chron('species', { n: target.id, ...(near !== undefined ? { a: near } : {}), major: 1 });
+      }
+    }
+  }
+
+  /** One herd period (2 hours), or m of them at once during a time skip. */
+  private updateHerd(h: Herd, world: World, t: number, m: number): void {
     const sp = SPECIES[h.species];
     const planet = world.planet;
     if (planet.heightM[h.cell] < 0) {
@@ -1655,35 +2443,40 @@ export class Life {
       h.count -= Math.ceil(h.count * 0.15);
       danger = true;
     }
-    if (st.plague && this.rng.chance(0.25)) h.count -= 1;
-    if (st.storm > 0.7 && this.rng.chance(0.2)) h.count -= 1;
+    if (st.plague && this.rng.chance(perStep(0.25, m))) h.count -= 1;
+    if (st.storm > 0.7 && this.rng.chance(perStep(0.2, m))) h.count -= 1;
     if (h.count <= 0) return;
 
     // Young are born once each spring when the herd is well fed.
     const date = dateFromMinutes(t);
-    if (date.season === 0 && date.dayOfSeason >= 3 && h.bornYear !== date.year && h.hunger < 0.5 && this.data.herds.length < MAX_HERDS) {
-      h.count += Math.max(1, Math.round(h.count * (sp.predator ? 0.35 : 0.3)));
+    if (date.season === 0 && date.dayOfSeason >= 3 && h.bornYear !== date.year && h.hunger < 0.5) {
+      // Fewer young when the land is full of animals.
+      const room = clamp(1 - this.data.herds.length / this.herdCap, 0, 1);
+      const young = h.count * (sp.predator ? 0.35 : 0.3) * (0.3 + 0.7 * room) * (1 - h.hunger);
+      h.count += Math.floor(young) + (this.rng.chance(young - Math.floor(young)) ? 1 : 0);
       h.bornYear = date.year;
+      this.evolve(h, world, t);
     }
 
     // Eating.
     if (sp.predator) {
-      h.hunger = Math.min(1, h.hunger + 0.022);
+      h.hunger = Math.min(1, h.hunger + 0.022 * m);
     } else {
-      const need = h.count * sp.appetite;
-      const got = this.eat(world, h.cell, t, need);
-      h.hunger = Math.max(0, Math.min(1, h.hunger + 0.05 - 0.14 * (got / Math.max(1e-6, need))));
+      // Herds live mostly on grass; only about a third of what they eat is food people want too.
+      const need = h.count * sp.appetite * (0.6 + 0.8 * h.genes[0]) * m;
+      const got = this.eat(world, h.cell, t, need * 0.35) / 0.35;
+      h.hunger = Math.max(0, Math.min(1, h.hunger + (0.05 - 0.14 * (got / Math.max(1e-6, need))) * m));
     }
     if (h.hunger >= 1) {
       // Starvation takes a share of the herd each step (on average), not a fixed number.
-      const loss = h.count * (sp.predator ? 0.004 : 0.012);
+      const loss = h.count * (sp.predator ? 0.004 : 0.012) * m;
       h.count -= Math.floor(loss) + (this.rng.chance(loss - Math.floor(loss)) ? 1 : 0);
     }
     if (h.count <= 0) return;
 
     // Moving.
     if (h.next >= 0) {
-      h.progress += (sp.speed * (HERD_DT / 60) * (danger ? 1.8 : 1)) / Math.max(1, world.kmBetween(h.cell, h.next));
+      h.progress += (sp.speed * (0.7 + 0.6 * h.genes[2]) * ((HERD_DT * m) / 60) * (danger ? 1.8 : 1)) / Math.max(1, world.kmBetween(h.cell, h.next));
       if (h.progress >= 1) {
         h.cell = h.next;
         h.next = -1;
@@ -1693,7 +2486,7 @@ export class Life {
       this.hunt(h, world);
     } else {
       const here = this.pasture(h, world, h.cell, t);
-      if (danger || here < 0.25 || h.hunger > 0.55 || this.rng.chance(0.03)) {
+      if (danger || here < 0.25 || h.hunger > 0.55 || this.rng.chance(perStep(0.03, m))) {
         let best = -1;
         let bestScore = danger ? -Infinity : here * 1.1;
         for (let k = planet.neighborOffsets[h.cell]; k < planet.neighborOffsets[h.cell + 1]; k++) {
@@ -1709,10 +2502,10 @@ export class Life {
     }
 
     // Big herds split.
-    if (h.count > sp.maxCount && this.data.herds.length < MAX_HERDS) {
+    if (h.count > sp.maxCount && this.data.herds.length < this.herdCap) {
       const half = Math.floor(h.count / 2);
       h.count -= half;
-      const child = this.addHerd(h.species, h.cell, half);
+      const child = this.addHerd(h.species, h.cell, half, h.genes, h.kind);
       if (child) child.hunger = h.hunger;
     }
   }
@@ -1723,7 +2516,8 @@ export class Life {
     if (planet.heightM[cell] < 0) return 0;
     const st = world.cellState(cell, t);
     if (st.burning || st.lavaHeat > 0 || st.water > 0.2) return 0;
-    const habitat = habitatScore(SPECIES[h.species], planet.biome[cell], planet.temperature[cell] + world.globalTemperature(t));
+    this.dayTemperature(world, cell, t);
+    const habitat = habitatScore(SPECIES[h.species], planet.biome[cell], this.feltTemperature(h, planet.temperature[cell] + this.climateNow));
     return habitat * (0.2 + this.foodAt(world, cell, t));
   }
 
@@ -1738,11 +2532,11 @@ export class Life {
       return;
     }
     let prey = h.prey >= 0 ? this.herd(h.prey) : undefined;
-    if (!prey || prey.count <= 0 || world.kmBetween(prey.cell, h.cell) > world.kmPerCell * 11) {
+    if (!prey || prey.count <= 0 || !world.within(prey.cell, h.cell, world.kmPerCell * 11)) {
       prey = undefined;
       let bestKm = world.kmPerCell * 10;
       for (const o of this.data.herds) {
-        if (o.count <= 0 || SPECIES[o.species].predator) continue;
+        if (o.count <= 0 || SPECIES[o.species].predator || !world.within(o.cell, h.cell, bestKm)) continue;
         const km = world.kmBetween(o.cell, h.cell);
         if (km < bestKm) {
           bestKm = km;
@@ -1758,8 +2552,11 @@ export class Life {
       if (planet.heightM[n] >= 0) h.next = n;
       return;
     }
+    prey.fear = this.data.t;
     if (prey.cell === h.cell) {
-      if (prey.species === 'mammoth' && !this.rng.chance(0.3)) return;
+      if (prey.species === 'mammoth' && !this.rng.chance(0.3 * (1.4 - prey.genes[0] * 0.8))) return;
+      // Fast prey escapes more often; fast wolves catch more.
+      if (!this.rng.chance(clamp(1.15 - prey.genes[2] * 0.6 + h.genes[2] * 0.3, 0.2, 1))) return;
       const kills = Math.min(prey.count, 1 + (this.rng.chance(0.35) ? 1 : 0) + (h.count > 8 ? 1 : 0));
       prey.count -= kills;
       h.hunger = Math.max(0, h.hunger - 0.55 * kills);
@@ -1849,6 +2646,12 @@ export class Life {
       case 'wForgive':
       case 'wComfort':
         return age < 3 ? 'young' : null;
+      case 'wIdea':
+        if (age < 14) return 'young';
+        return nextSteps(p.know).length > 0 ? null : 'noIdea';
+      case 'wTeach':
+        if (age < ADULT_AGE) return 'young';
+        return p.know ? null : 'nothingToTeach';
       default:
         return null;
     }
@@ -1857,9 +2660,13 @@ export class Life {
   /** What a power does to the living (its effect on the land is handled by the World). */
   applyEvent(e: PowerEvent, world: World): EventOutcome {
     this.ensureBands(world);
+    // Derived helpers start fresh, exactly as after restoring a snapshot.
+    this.seasonDay = -1;
+    this.invalidateKnowledge();
+    this.gameCache.clear();
     const rng = new Rng(e.seed).fork('life');
     const t = this.data.t;
-    const within = (km: number) => this.data.people.filter((p) => p.alive && world.kmBetween(p.cell, e.cell) <= km);
+    const within = (km: number) => this.data.people.filter((p) => p.alive && world.within(p.cell, e.cell, km));
     const target = e.target !== undefined ? this.person(e.target) : undefined;
     const outcome: EventOutcome = {};
     if (CHRONICLED.has(e.kind) && e.cell >= 0) {
@@ -1914,6 +2721,7 @@ export class Life {
             const band = this.newBand(p.id);
             p.band = band.id;
           }
+          this.invalidateKnowledge();
         }
         break;
       }
@@ -1933,11 +2741,26 @@ export class Life {
         break;
       }
       case 'spawnAnimals': {
+        if ((e.extra ?? 0) >= SPECIES_IDS.length) {
+          // A new species nobody has seen before.
+          const base = SPECIES_IDS[rng.int(0, SPECIES_IDS.length - 1)];
+          const genes: [number, number, number] = [0.5, 0.5, 0.5];
+          const strong = rng.int(0, 2);
+          for (let i = 0; i < 3; i++) genes[i] = clamp(0.5 + (i === strong ? (rng.chance(0.5) ? 1 : -1) * rng.range(0.32, 0.45) : rng.range(-0.15, 0.15)), 0.03, 0.97);
+          const rec = this.newSpecies(base, genePrefix(genes, [0.5, 0.5, 0.5]), genes);
+          const [lo, hi] = SPECIES[base].startCount;
+          this.addHerd(base, Life.nearestLand(world, e.cell), rng.int(lo, hi), genes, rec.id);
+          this.chron('species', { n: rec.id, s: 'god', major: 1 });
+          break;
+        }
         const species = SPECIES_IDS[Math.max(0, Math.min(SPECIES_IDS.length - 1, e.extra ?? 0))];
         const [lo, hi] = SPECIES[species].startCount;
         this.addHerd(species, Life.nearestLand(world, e.cell), rng.int(lo, hi));
         break;
       }
+      case 'timeSkip':
+        this.data.coarseUntil = t + Math.max(0, e.extra ?? 0);
+        break;
       case 'smite':
         if (target?.alive) this.die(target, 'god');
         break;
@@ -1960,9 +2783,10 @@ export class Life {
           this.log(p, 'carried');
           // Carried far from the group: start a new one.
           const leader = this.leaderOf(p);
-          if (leader && world.kmBetween(leader.cell, p.cell) > world.kmPerCell * 20) {
+          if (leader && !world.within(leader.cell, p.cell, world.kmPerCell * 20)) {
             const band = this.newBand(p.id);
             p.band = band.id;
+            this.invalidateKnowledge();
           }
         }
         break;
@@ -2014,10 +2838,14 @@ export class Life {
       case 'wEmigrate':
       case 'wPeace':
       case 'wLead':
+      case 'wIdea':
+      case 'wTeach':
         if (target?.alive) {
           const other = e.other !== undefined ? this.person(e.other) : undefined;
           outcome.person = target.id;
+          this.idea = undefined;
           outcome.result = this.whisper(e.kind, target, other, world, t, rng);
+          if (this.idea) outcome.invention = this.idea;
         }
         break;
       default:
@@ -2122,6 +2950,27 @@ export class Life {
         this.log(p, 'madePeace');
         return 'accepted';
       }
+      case 'wIdea': {
+        // Only the next step: what this person is ready for, the most fitting idea first.
+        const c = this.circumstances(p, world, t);
+        const options = nextSteps(p.know).sort((a, b) => circumstanceFactor(b, c) - circumstanceFactor(a, c));
+        if (!take(0.55 + (tr[T_CLEVER] + tr[T_CURIOUS]) / 400)) return 'resisted';
+        const id = options[0];
+        this.idea = id;
+        if (this.bandKnows(p.band) & BIT[id] || this.worldKnows() & BIT[id]) {
+          this.learn(p, id);
+          this.log(p, 'invented', { n: INVENTION_IDS.indexOf(id) });
+          this.addMood(p, 'invented', 15, 30);
+          this.data.everKnown |= BIT[id];
+        } else this.invent(p, id);
+        return 'accepted';
+      }
+      case 'wTeach':
+        if (!take(0.5 + tr[T_KIND] / 250 + tr[T_CLEVER] / 400)) return 'resisted';
+        p.teacher = t + 10 * YEAR;
+        p.task = 'teach';
+        this.log(p, 'teacher');
+        return 'accepted';
       case 'wLead': {
         const chance = 0.35 + tr[T_AMBITIOUS] / 220 + tr[T_BRAVE] / 400 + tr[T_CLEVER] / 500;
         if (!take(chance)) return 'resisted';
@@ -2138,4 +2987,35 @@ export class Life {
         return 'resisted';
     }
   }
+}
+
+/** A chance per tick turned into a chance per step of k ticks. */
+function perStep(p: number, k: number): number {
+  return k === 1 ? p : 1 - Math.pow(1 - Math.min(p, 0.999), k);
+}
+
+function countKnown(mask: number): number {
+  let n = 0;
+  for (let m = mask; m; m &= m - 1) n++;
+  return n;
+}
+
+function geneDistance(a: readonly number[], b: readonly number[]): number {
+  return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+}
+
+const GENE_WORDS: [string, string][] = [
+  ['giant', 'dwarf'],
+  ['woolly', 'bare'],
+  ['swift', 'heavy'],
+];
+
+/** A name part from how the genes changed: the strongest change, and the second if it is clear. */
+export function genePrefix(genes: readonly number[], from: readonly number[]): string {
+  const d = [0, 1, 2].map((i) => genes[i] - from[i]);
+  const order = [0, 1, 2].sort((a, b) => Math.abs(d[b]) - Math.abs(d[a]));
+  const word = (i: number) => GENE_WORDS[i][d[i] >= 0 ? 0 : 1];
+  const parts = [word(order[0])];
+  if (Math.abs(d[order[1]]) > 0.2) parts.push(word(order[1]));
+  return parts.join('+');
 }

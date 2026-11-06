@@ -32,7 +32,8 @@ import { Overlay, World, type ClimateShift } from '../sim/world';
 import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
 import { Life, REVIVE_WINDOW, TICK, type EventOutcome } from '../sim/life/life';
 import type { ChronicleKey, SpeciesId } from '../sim/life/types';
-import { PeopleInfo, type ChronicleLine, type FamilyTree, type PersonInfo } from './peopleInfo';
+import { PeopleInfo, type ChronicleLine, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
+import { BIT } from '../sim/life/inventions';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
 import { TerrainView } from '../render/terrain';
 import { TreeView } from '../render/trees';
@@ -65,7 +66,7 @@ import { SoundEngine, type SoundName } from '../audio/sound';
 import { isLifeData, parseSaveData, sanitizeEvents, type LifeSnapshot, type SaveData } from './saveData';
 
 export type { SaveData };
-export type { Activity, ChronicleLine, FamilyTree, PersonInfo } from './peopleInfo';
+export type { Activity, ChronicleLine, FamilyTree, KnowledgeInfo, PersonInfo, SpeciesInfo } from './peopleInfo';
 
 /** A snapshot of the living world kept in memory as compact text. */
 interface MemSnapshot {
@@ -76,7 +77,38 @@ interface MemSnapshot {
 }
 
 /** Chronicle lines that also pop up as a message (if important). */
-const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader']);
+const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone']);
+
+/** A running time skip. */
+interface SkipRun {
+  eventId: number;
+  from: number;
+  to: number;
+  pop: number;
+  births: number;
+  deaths: number;
+  chronicle: number;
+  stop: boolean;
+}
+
+export interface SkipProgress {
+  years: number;
+  /** 0 … 1 */
+  done: number;
+  /** Calendar year now. */
+  year: number;
+}
+
+/** What happened during a time skip. */
+export interface SkipSummary {
+  years: number;
+  popBefore: number;
+  popAfter: number;
+  births: number;
+  deaths: number;
+  lines: ChronicleLine[];
+  stopped: boolean;
+}
 
 const SAVE_KEY = 'enis.save.v3';
 const OLD_SAVE_KEYS = ['enis.save.v2', 'enis.save.v1'];
@@ -126,6 +158,9 @@ export interface PlaceInfo {
 export interface HerdInfo {
   id: number;
   species: SpeciesId;
+  /** Name part of an evolved species ('' for the original one). */
+  prefix: string;
+  genes: [number, number, number];
   count: number;
   activity: 'grazing' | 'moving' | 'hunting' | 'hungry' | 'roaming';
   biome: Biome;
@@ -178,6 +213,9 @@ export interface UiState {
   carryStep: 'pick' | 'place' | 'pick2' | null;
   /** Grows with each line of the chronicle (so open views refresh). */
   chronicleCount: number;
+  skip: SkipProgress | null;
+  skipSummary: SkipSummary | null;
+  epoch: 'none' | 'paleolithic' | 'mesolithic';
   climate: ClimateInfo;
   eventCount: number;
   soundOn: boolean;
@@ -260,6 +298,8 @@ export class Game {
   private carryTarget: number | null = null;
   /** Whispered love: the person who is to love someone. */
   private pairFirst: number | null = null;
+  private skipRun: SkipRun | null = null;
+  private lastSkipUi = 0;
   private effects: Effect[] = [];
   private ongoing = new Map<number, OngoingView>();
   private lastOverlayMinutes = -1;
@@ -309,6 +349,9 @@ export class Game {
       armedOption: null,
       carryStep: null,
       chronicleCount: 0,
+      skip: null,
+      skipSummary: null,
+      epoch: 'none',
       climate: { kind: null, temperature: 0, dust: 0 },
       eventCount: 0,
       soundOn: this.sound.enabled,
@@ -442,6 +485,8 @@ export class Game {
       this.snapshots = [];
     }
     this.life = life;
+    this.skipRun = null;
+    if (life.skipping) this.cutSkips(world, life.t);
     this.info = new PeopleInfo(life, planet);
     this.seenChronicle = life.chronicle.length;
     this.clock.minutes = minutes;
@@ -635,6 +680,7 @@ export class Game {
   }
 
   private onTap(clientX: number, clientY: number): void {
+    if (this.skipRun) return;
     if (!this.armed) {
       const entity = this.pickEntity(clientX, clientY, () => true);
       if (entity) this.selectEntity(entity.kind, entity.id);
@@ -769,7 +815,7 @@ export class Game {
    * Powers aimed at a place act where the person stands.
    */
   castOn(kind: PowerKind, id: number): void {
-    if (!this.world || !this.life) return;
+    if (!this.world || !this.life || this.skipRun) return;
     const p = this.life.person(id);
     if (!p) return;
     const def = powerDef(kind);
@@ -831,7 +877,7 @@ export class Game {
     } else if (powerDef(kind).category === 'whisper') {
       // Whispers are invisible to the people; you see a faint shimmer.
       burst(fx, 'whisper', at, 0.5);
-      if (outcome.result === 'accepted') this.notify(`notice.whisper.${kind}` as MessageKey, { name });
+      if (outcome.result === 'accepted') this.notify(`notice.whisper.${kind}` as MessageKey, { name, ...(outcome.invention ? { invention: outcome.invention } : {}) });
       else if (outcome.result === 'noPlace') this.notify('notice.whisper.noPlace', { name });
       else this.notify('notice.whisper.resisted', { name });
     }
@@ -899,7 +945,7 @@ export class Game {
   }
 
   private onBrush(phase: 'start' | 'move' | 'end', clientX: number, clientY: number): void {
-    if (!this.world || !this.armed) return;
+    if (!this.world || !this.armed || this.skipRun) return;
     const { world, fx } = this.world;
     if (phase === 'end') {
       if (this.stroke) {
@@ -1090,7 +1136,7 @@ export class Game {
   }
 
   rewindTo(point: RewindPoint): void {
-    if (!this.world || !this.life) return;
+    if (!this.world || !this.life || this.skipRun) return;
     const snap = this.findSnapshot(point);
     if (!snap) return;
     for (const e of this.effects) e.dispose();
@@ -1111,6 +1157,8 @@ export class Game {
     }
     life.advanceTo(point.minutes, world);
     this.life = life;
+    // A time skip that was running at that point ends there.
+    this.cutSkips(world, point.minutes);
     this.info = new PeopleInfo(life, world.planet);
     this.seenChronicle = life.chronicle.length;
     this.snapshots = this.snapshots.filter((s) => s.t <= point.minutes && s.eventCount <= point.eventCount);
@@ -1124,6 +1172,110 @@ export class Game {
     this.save();
     this.play('chill');
     this.notify('notice.rewound');
+  }
+
+  // ---------------------------------------------------------------- time skip
+
+  /** Jumps years ahead: the living world is computed in larger steps, without waiting for the clock. */
+  timeSkip(years: number): void {
+    if (!this.world || !this.life || this.skipRun) return;
+    this.arm(null);
+    this.following = false;
+    const life = this.life;
+    const event = this.newEvent('timeSkip', -1);
+    event.extra = Math.round(years * MINUTES_PER_YEAR);
+    const pop = life.population();
+    const births = life.births;
+    const deaths = life.deaths;
+    const chronicle = life.chronicle.length;
+    this.commit(event);
+    this.skipRun = { eventId: event.id, from: life.t, to: life.t + event.extra, pop, births, deaths, chronicle, stop: false };
+    this.ui.set({ skip: { years, done: 0, year: dateFromMinutes(life.t).year }, skipSummary: null, following: false });
+  }
+
+  stopSkip(): void {
+    if (this.skipRun) this.skipRun.stop = true;
+  }
+
+  closeSkipSummary(): void {
+    this.ui.set({ skipSummary: null });
+  }
+
+  /** A slice of the time skip per frame, with a snapshot at every decade mark (for rewinding). */
+  private runSkip(now: number): void {
+    const run = this.skipRun!;
+    const life = this.life!;
+    const world = this.world!.world;
+    // Most of each frame goes to the simulation; the picture updates a few times a second.
+    const until = performance.now() + 45;
+    while (performance.now() < until && life.t < run.to && !run.stop) {
+      const year = life.t / MINUTES_PER_YEAR;
+      const mark = (Math.floor((year + 1) / 10) * 10 + 9) * MINUTES_PER_YEAR;
+      const target = Math.min(run.to, mark);
+      life.advanceTo(target, world, 300);
+      if (life.t === mark) this.takeSnapshot(true);
+      if (life.population() === 0) run.stop = true;
+    }
+    this.clock.minutes = Math.max(this.clock.minutes, life.t);
+    if (life.t >= run.to || run.stop) {
+      this.finishSkip();
+      return;
+    }
+    if (now - this.lastSkipUi > 150) {
+      this.lastSkipUi = now;
+      const years = (run.to - run.from) / MINUTES_PER_YEAR;
+      this.ui.set({
+        skip: { years, done: (life.t - run.from) / (run.to - run.from), year: dateFromMinutes(life.t).year },
+        population: life.population(),
+        date: dateFromMinutes(life.t),
+      });
+    }
+  }
+
+  private finishSkip(): void {
+    const run = this.skipRun;
+    if (!run || !this.world || !this.life) return;
+    this.skipRun = null;
+    const life = this.life;
+    const { world } = this.world;
+    if (life.t < run.to) this.cutSkips(world, life.t);
+    this.clock.minutes = life.t;
+    this.takeSnapshot(true);
+    const lines: ChronicleLine[] = [];
+    if (this.info) {
+      for (let i = life.chronicle.length - 1; i >= run.chronicle && lines.length < 12; i--) {
+        const e = life.chronicle[i];
+        if (e.major || e.key === 'invention' || e.key === 'species') lines.push(this.info.chronicleLine(e, i));
+      }
+    }
+    const summary: SkipSummary = {
+      years: Math.round((life.t - run.from) / MINUTES_PER_YEAR),
+      popBefore: run.pop,
+      popAfter: life.population(),
+      births: life.births - run.births,
+      deaths: life.deaths - run.deaths,
+      lines,
+      stopped: life.t < run.to,
+    };
+    this.seenChronicle = life.chronicle.length;
+    this.refreshEverything();
+    this.ui.set({
+      skip: null,
+      skipSummary: summary,
+      population: life.population(),
+      date: dateFromMinutes(life.t),
+      chronicleCount: life.chronicle.length,
+    });
+    this.save();
+    this.play('chime');
+  }
+
+  /** Time skips end at `t` (stopped early, rewound into, or reloaded during one). */
+  private cutSkips(world: World, t: number): void {
+    for (const e of world.events) {
+      if (e.kind === 'timeSkip' && e.minutes + (e.extra ?? 0) > t) e.extra = Math.max(0, t - e.minutes);
+    }
+    this.life?.endSkip();
   }
 
   // ---------------------------------------------------------------- selection
@@ -1148,6 +1300,14 @@ export class Game {
 
   chronicleLines(limit?: number): ChronicleLine[] {
     return this.info?.chronicle(limit) ?? [];
+  }
+
+  knowledge(): KnowledgeInfo[] {
+    return this.info?.knowledge() ?? [];
+  }
+
+  speciesList(): SpeciesInfo[] {
+    return this.info?.species() ?? [];
   }
 
   /** New lines in the chronicle; important ones pop up as a message. */
@@ -1236,15 +1396,19 @@ export class Game {
     const { world, overlay, sky, atmosphere, clouds, trees, terrain, fire, lifeView } = this.world;
     const life = this.life;
 
-    // Time: the clock moves (not while shaping the land), the living world follows step by step.
-    if (!this.stroke) this.clock.advance(dt);
-    life.advanceTo(this.clock.minutes, world, MAX_TICKS_PER_FRAME);
-    if (this.clock.minutes - life.t > TICK * 3) this.clock.minutes = life.t + TICK;
-    if (life.t - (this.snapshots[this.snapshots.length - 1]?.t ?? -Infinity) >= 2 * DAY && now - this.lastSnapshotReal > 1200) {
-      this.lastSnapshotReal = now;
-      this.takeSnapshot(true);
+    if (this.skipRun) {
+      this.runSkip(now);
+    } else {
+      // Time: the clock moves (not while shaping the land), the living world follows step by step.
+      if (!this.stroke) this.clock.advance(dt);
+      life.advanceTo(this.clock.minutes, world, MAX_TICKS_PER_FRAME);
+      if (this.clock.minutes - life.t > TICK * 3) this.clock.minutes = life.t + TICK;
+      if (life.t - (this.snapshots[this.snapshots.length - 1]?.t ?? -Infinity) >= 2 * DAY && now - this.lastSnapshotReal > 1200) {
+        this.lastSnapshotReal = now;
+        this.takeSnapshot(true);
+      }
+      this.announceChronicle(life);
     }
-    this.announceChronicle(life);
 
     const t = this.clock.minutes;
     const yf = this.clock.yearFraction();
@@ -1414,6 +1578,13 @@ export class Game {
     }
   }
 
+  /** The age the most advanced people live in. */
+  private epochNow(): UiState['epoch'] {
+    if (!this.life || this.life.population() === 0) return 'none';
+    const k = this.life.worldKnows();
+    return k & BIT.bow && k & BIT.fishing ? 'mesolithic' : 'paleolithic';
+  }
+
   private pushUi(): void {
     if (!this.world || !this.life) return;
     const { world } = this.world;
@@ -1427,6 +1598,7 @@ export class Game {
       focusDaylight: f.dot(this.realSunDir) > -0.05,
       climate: { kind: world.climateLabel(t), temperature: world.globalTemperature(t), dust: world.dust(t) },
       population: this.life.population(),
+      epoch: this.epochNow(),
     };
     if (this.selectedCell !== null) patch.place = this.placeInfo(world.planet, this.selectedCell);
     if (this.selection?.kind === 'person') {
@@ -1440,6 +1612,8 @@ export class Game {
         ? {
             id: h.id,
             species: h.species,
+            prefix: this.life.speciesRecord(h.kind)?.prefix ?? '',
+            genes: [h.genes[0], h.genes[1], h.genes[2]],
             count: h.count,
             activity: h.species === 'wolf' ? (h.prey >= 0 && h.hunger > 0.3 ? 'hunting' : 'roaming') : h.hunger > 0.7 ? 'hungry' : h.next >= 0 ? 'moving' : 'grazing',
             biome: world.planet.biome[h.cell] as Biome,

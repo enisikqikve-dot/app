@@ -1,5 +1,6 @@
 import { t, type MessageKey } from '../i18n';
 import type { ChronicleLine } from '../game/peopleInfo';
+import { inventionName, speciesName } from './names';
 
 /** One line of the world chronicle, written like a history book. */
 export function chronicleText(l: ChronicleLine, planet: string): string {
@@ -37,6 +38,16 @@ export function chronicleText(l: ChronicleLine, planet: string): string {
       return l.s === 'revive' ? t('chron.power.revive', { a }) : t(`chron.power.${l.s}` as MessageKey, { near });
     case 'sign':
       return t(`chron.sign.${Math.max(0, Math.min(2, n))}` as MessageKey, { near });
+    case 'invention':
+      return t(n ? 'chron.reinvention' : 'chron.invention', { a, invention: inventionName(l.s ?? '') });
+    case 'lost':
+      return t('chron.lost', { invention: inventionName(l.s ?? '') });
+    case 'species': {
+      const species = l.species ? speciesName(l.species.base, l.species.prefix) : '?';
+      return l.s === 'god' ? t('chron.speciesGod', { species }) : t('chron.species', { species, near });
+    }
+    case 'speciesGone':
+      return t('chron.speciesGone', { species: l.species ? speciesName(l.species.base, l.species.prefix) : '?' });
     default:
       return '';
   }

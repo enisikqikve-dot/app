@@ -1493,3 +1493,118 @@ button.chron-line:hover {
     font-size: 12.5px;
   }
 }
+
+/* ---------------------------------------------------------------- milestone 5: knowledge & long times */
+
+.chron-body {
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chron-body .chron-list {
+  overflow: visible;
+}
+.know-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.know {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+.know.is-unknown {
+  opacity: 0.55;
+}
+.know.is-lost {
+  border-color: rgba(255, 150, 90, 0.35);
+}
+.know-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.know-head .chip {
+  margin: 0;
+}
+.know-info {
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.know-meta {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.speed-btn.skip-btn {
+  min-width: 40px;
+}
+.speed-btn.skip-btn.is-open {
+  color: var(--sun);
+}
+.speed-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.skip-menu {
+  position: absolute;
+  right: var(--edge-right);
+  top: calc(var(--edge-top) + 72px);
+  width: min(340px, calc(100vw - 32px));
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 5;
+}
+.skip-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.skip-bar {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--edge-top) + 76px);
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 5;
+}
+.skip-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.skip-progress {
+  flex: 1;
+}
+.skip-summary .btn-primary {
+  align-self: flex-start;
+}
+
+@media (max-width: 640px) {
+  .skip-menu {
+    left: var(--edge-left);
+    right: var(--edge-right);
+    width: auto;
+    top: auto;
+    bottom: calc(var(--edge-bottom) + 92px);
+  }
+  .skip-bar {
+    top: calc(var(--edge-top) + 128px);
+  }
+}

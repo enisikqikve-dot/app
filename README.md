@@ -8,7 +8,35 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 4 – Leben & Liebe ✅
+## Stand: Meilenstein 5 – Wissen & lange Zeiten ✅
+
+**Neu: Die Menschen erfinden von selbst, arbeiten für ihre Gruppe, bauen Lager, und die Tiere entwickeln sich weiter.**
+
+- **Wissensnetz mit 11 Erfindungen der Steinzeit:** Steinwerkzeug, Feuer, Speer, Fellkleidung, Sprache und Gesang, Hütten, Fischfang, Heilkräuter, Pfeil und Bogen, Töpferei, Bestattung.
+  - Es gibt keine feste Reihenfolge. Jede Erfindung braucht Vorwissen, und ob jemand die Idee hat, hängt von Gelegenheit, Not, Klugheit, Neugier und Zufall ab: Ein Blitzfeuer bringt jemanden auf das Feuer, Kälte auf die Kleidung.
+  - Wissen steckt in den Köpfen. Es wird beim Reden und Lehren weitergegeben, Kinder lernen von den Eltern.
+  - Stirbt der Letzte, der etwas weiß, ist das Wissen verloren. Die Chronik schreibt es auf.
+  - Jede Erfindung wirkt: Feuer und Kleidung schützen vor Kälte, Heilkräuter retten Kinder, mit dem Speer wird gejagt.
+  - Kennen die Menschen Pfeil und Bogen und Fischfang, beginnt die Mittelsteinzeit.
+- **Arbeit nach Bedarf und Talent:** Sammeln, Jagen, Fischen, Hütten bauen, Kranke pflegen, Lehren, Tüfteln, Feuer hüten. Jeder wählt täglich nach dem, was der Gruppe fehlt, und nach dem eigenen Charakter.
+  - Jäger und Fischer füllen einen gemeinsamen Vorrat, den alle teilen.
+- **Lager:** Hütten aus Fellen und eine Feuerstelle, die nachts leuchtet. Mit Hütten bleibt eine Gruppe länger an einem Ort, verlassene Lager zerfallen.
+- **Zeitsprung (⏭ oben):** +10, +100 oder +1000 Jahre.
+  - Die Welt rechnet in größeren Schritten weiter, mit Fortschrittsbalken und Anhalten.
+  - Danach zeigt eine Zusammenfassung, was geschehen ist.
+  - Zurückspulen geht auch mitten in einen Sprung hinein.
+- **Evolution der Tiere:** Jede Herde hat Gene für Größe, Fell und Tempo.
+  - Jungtiere ähneln den Eltern, und was zum Ort passt, setzt sich durch: In der Kälte wächst dickes Fell, gejagte Tiere werden schneller.
+  - Wird eine Herde sehr anders, entsteht eine neue Art mit eigenem Namen, zum Beispiel „Wollmammuts“ oder „Riesen-Wollhirsche“.
+  - Arten können aussterben, auch durch zu viel Jagd.
+- **Chronik mit drei Reitern:** Chronik, Wissen (das Wissensnetz) und Tierarten.
+- **Neue Kräfte:** Idee (nur der nächste Schritt) und Lehrer werden bei „Gedanken flüstern“, eine ganz neue Tierart bei „Tiere aussetzen“.
+- **Leichteres Überleben:**
+  - In feuchtem Land finden Menschen kleine Bäche zum Trinken.
+  - Junge Leute ohne passenden Partner ziehen zu einer Nachbargruppe.
+  - Kleine Gruppen bekommen mehr Kinder.
+
+### Meilenstein 4 – Leben & Liebe ✅
 
 **Neu: Die Menschen haben einen Charakter, Gefühle und Familien und leben über Generationen.**
 
@@ -125,6 +153,11 @@ das ist exakt reproduzierbar.
 Archiv und Weltchronik wachsen nur. Die Abbilder speichern deshalb nur, wie
 lang beide Listen gerade waren, und teilen sich die Listen selbst.
 
+Ein Zeitsprung ist selbst ein Ereignis in der Liste. Während des Sprungs
+rechnet das Leben in 2-Stunden-Schritten statt in 20-Minuten-Schritten. Beim
+Wiederholen gilt deshalb genau dieselbe Schrittweite, und Zurückspulen bleibt
+exakt. Zu jedem vollen Jahrzehnt entsteht ein Abbild.
+
 ## Aufbau
 
 ```
@@ -134,8 +167,9 @@ src/
     clock.ts   Kalender, Geschwindigkeiten, Sonnenstand
     planet/    geodätisches Netz, Gelände, Klima, Landschaften
     world.ts   Welt-Gedächtnis: Ereignisse, Narben (Feuer, Lava, Flut …), Klima
-    life/      Menschen, Gruppen, Vererbung, Stimmung, Tierherden, Nahrung,
-               Archiv und Weltchronik (feste Schritte, eigener Zufall)
+    life/      Menschen, Gruppen, Vererbung, Stimmung, Wissensnetz und Arbeit,
+               Lager, Tierherden mit Evolution, Nahrung, Archiv und
+               Weltchronik (feste Schritte, eigener Zufall)
     powers.ts  die Götterkräfte
   render/      Three.js: Boden, Meer, Flüsse, Atmosphäre, Himmel, Bäume, Wolken,
                Menschen, Tiere, Sprechblasen, Kamera

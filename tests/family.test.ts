@@ -81,7 +81,7 @@ describe('life and love', () => {
     const b = setup(1234);
     const resumed = Life.restore(snap, { archive: a.life.archive, chronicle: a.life.chronicle });
     resumed.advanceTo(24 * YEAR, b.world);
-    expect(JSON.stringify(resumed.serialize())).toBe(JSON.stringify(a.life.serialize()));
+    expect(resumed.serialize()).toEqual(a.life.serialize());
   });
 
   it('lets whispers change minds, but not always', () => {

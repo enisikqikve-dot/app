@@ -14,7 +14,7 @@ import type { Life } from '../sim/life/life';
 import { REVIVE_WINDOW } from '../sim/life/life';
 import type { Herd, Person, SpeciesId } from '../sim/life/types';
 import { CLOTH_COLORS, HAIR_COLORS, HAIR_GREY } from '../sim/life/types';
-import { MINUTES_PER_YEAR } from '../sim/clock';
+import { MINUTES_PER_DAY, MINUTES_PER_YEAR } from '../sim/clock';
 import { SPECIES_IDS } from '../sim/life/species';
 import type { TerrainView } from './terrain';
 import { R } from './scale';
@@ -22,6 +22,8 @@ import { R } from './scale';
 const PERSON_SCALE = 1.45;
 const MAX_PEOPLE = 360;
 const MAX_GRAVES = 400;
+const MAX_STRUCTURES = 240;
+const MAX_FIRES = 80;
 /** Graves stay visible for this long. */
 const GRAVE_YEARS = 12;
 
@@ -152,6 +154,61 @@ function animalGeometry(species: SpeciesId): THREE.BufferGeometry {
   return g;
 }
 
+function painted(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  const geo = g.index ? g.toNonIndexed() : g;
+  const c = new THREE.Color(hex);
+  const n = geo.getAttribute('position').count;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.deleteAttribute('uv');
+  return geo;
+}
+
+/** A hut of hides on poles, with a dark doorway (front = +z). */
+function hutGeometry(): THREE.BufferGeometry {
+  const g = mergeGeometries([
+    painted(new THREE.ConeGeometry(0.2, 0.3, 7).translate(0, 0.15, 0), 0x8a6a48),
+    painted(new THREE.ConeGeometry(0.075, 0.12, 4, 1, true, 0, Math.PI).rotateY(Math.PI).translate(0, 0.06, 0.15), 0x2a1d14),
+    painted(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 4).translate(0.025, 0.33, 0).rotateZ(0.25), 0x4a3524),
+    painted(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 4).translate(-0.025, 0.33, 0).rotateZ(-0.25), 0x4a3524),
+  ])!;
+  g.scale(1.6, 1.6, 1.6);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A ring of stones with crossed logs. */
+function fireplaceGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2;
+    parts.push(painted(new THREE.DodecahedronGeometry(0.022, 0).translate(Math.cos(a) * 0.07, 0.012, Math.sin(a) * 0.07), 0x7d7a74));
+  }
+  parts.push(painted(new THREE.CylinderGeometry(0.01, 0.01, 0.11, 5).rotateZ(Math.PI / 2).translate(0, 0.02, 0), 0x4a3221));
+  parts.push(painted(new THREE.CylinderGeometry(0.01, 0.01, 0.11, 5).rotateX(Math.PI / 2).translate(0, 0.025, 0), 0x3d291b));
+  const g = mergeGeometries(parts)!;
+  g.scale(1.6, 1.6, 1.6);
+  g.computeVertexNormals();
+  return g;
+}
+
+function glowTexture(): THREE.Texture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255,230,160,1)');
+  g.addColorStop(0.3, 'rgba(255,150,50,0.7)');
+  g.addColorStop(1, 'rgba(255,120,30,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 function dotTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -183,6 +240,11 @@ export class LifeView {
   private readonly graves: THREE.InstancedMesh;
   private readonly animals: Record<SpeciesId, THREE.InstancedMesh>;
   private readonly dots: THREE.Points;
+  private readonly huts: THREE.InstancedMesh;
+  private readonly fireplaces: THREE.InstancedMesh;
+  private readonly flames: THREE.InstancedMesh;
+  private readonly fireGlow: THREE.Points;
+  private readonly glowPositions: Float32Array;
   private readonly dotPositions: Float32Array;
   private readonly shown = new Map<number, THREE.Vector3>();
   private readonly entities: ScreenEntity[] = [];
@@ -220,7 +282,24 @@ export class LifeView {
       this.animals[sp] = mesh;
       this.group.add(mesh);
     }
-    for (const mesh of [this.body, this.head, this.hair, this.graves]) {
+    this.huts = new THREE.InstancedMesh(hutGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 }), MAX_STRUCTURES);
+    this.fireplaces = new THREE.InstancedMesh(fireplaceGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }), MAX_FIRES);
+    this.flames = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.05, 0.16, 6).translate(0, 0.1, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffa23a, transparent: true, opacity: 0.9, toneMapped: false }),
+      MAX_FIRES,
+    );
+    this.glowPositions = new Float32Array(MAX_FIRES * 3);
+    const gg = new THREE.BufferGeometry();
+    gg.setAttribute('position', new THREE.BufferAttribute(this.glowPositions, 3).setUsage(THREE.DynamicDrawUsage));
+    gg.setDrawRange(0, 0);
+    this.fireGlow = new THREE.Points(
+      gg,
+      new THREE.PointsMaterial({ map: glowTexture(), size: 1.4, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }),
+    );
+    this.fireGlow.frustumCulled = false;
+    this.group.add(this.fireGlow);
+    for (const mesh of [this.body, this.head, this.hair, this.graves, this.huts, this.fireplaces, this.flames]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
       this.group.add(mesh);
@@ -372,10 +451,54 @@ export class LifeView {
     (this.dots.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     dotMat.size = 10 + 6 * (0.5 + 0.5 * Math.sin(now * 3));
 
+    this.updateStructures(life, now, near, gameMinutes);
     this.updateAnimals(dt, life, now, camera, cameraDistance, focus, seen);
 
     // Forget people and herds that are gone.
     for (const id of [...this.shown.keys()]) if (!seen.has(id)) this.shown.delete(id);
+  }
+
+  /** Huts and fireplaces near the camera; flames flicker and glow at night. */
+  private updateStructures(life: Life, now: number, near: boolean, gameMinutes: number): void {
+    let huts = 0;
+    let fires = 0;
+    if (near) {
+      for (const st of life.structures) {
+        entityDir(this.planet, st.cell, -1, 0, st.spot, this.v);
+        this.ground(this.v, st.cell, this.w);
+        if (st.kind === 'hut') {
+          if (huts >= MAX_STRUCTURES) continue;
+          orient(this.v, hash(st.id) * Math.PI * 2, this.q);
+          const grow = 0.35 + 0.65 * st.built;
+          // Old, abandoned huts sag.
+          const age = Math.max(0, gameMinutes - st.used) / (4 * MINUTES_PER_YEAR);
+          this.m.compose(this.w, this.q, this.s.set(1, grow * (1 - 0.5 * age), 1));
+          this.huts.setMatrixAt(huts++, this.m);
+        } else {
+          if (fires >= MAX_FIRES) continue;
+          orient(this.v, hash(st.id) * Math.PI * 2, this.q);
+          this.m.compose(this.w, this.q, this.s.setScalar(1));
+          this.fireplaces.setMatrixAt(fires, this.m);
+          const lit = gameMinutes - st.used < 2 * MINUTES_PER_DAY;
+          const flick = lit ? 0.75 + 0.35 * Math.sin(now * 13 + st.id) * Math.sin(now * 7.3 + st.id * 2) : 0.001;
+          this.m.compose(this.w, this.q, this.s.set(flick, lit ? flick * 1.2 : 0.001, flick));
+          this.flames.setMatrixAt(fires, this.m);
+          const up = this.v;
+          this.glowPositions.set([this.w.x + up.x * 0.25, this.w.y + up.y * 0.25, this.w.z + up.z * 0.25], fires * 3);
+          if (!lit) this.glowPositions.set([0, 0, 0], fires * 3);
+          fires++;
+        }
+      }
+    }
+    this.huts.count = huts;
+    this.huts.instanceMatrix.needsUpdate = true;
+    this.fireplaces.count = fires;
+    this.fireplaces.instanceMatrix.needsUpdate = true;
+    this.flames.count = fires;
+    this.flames.instanceMatrix.needsUpdate = true;
+    this.fireGlow.geometry.setDrawRange(0, fires);
+    (this.fireGlow.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    (this.fireGlow.material as THREE.PointsMaterial).size = 1.1 + 0.25 * Math.sin(now * 9);
   }
 
   private personTarget(p: Person, gameMinutes: number, out: THREE.Vector3): THREE.Vector3 {
@@ -438,8 +561,12 @@ export class LifeView {
           this.ground(pdir, h.cell, this.w);
           const yaw = heading ?? hash(h.id + i * 13) * Math.PI * 2 + Math.sin(now * 0.4 + i) * 0.4;
           orient(pdir, yaw, this.q);
-          this.m.compose(this.w, this.q, this.s.setScalar(0.85 + hash(h.id * 3 + i) * 0.3));
+          this.m.compose(this.w, this.q, this.s.setScalar((0.85 + hash(h.id * 3 + i) * 0.3) * (0.7 + 0.6 * h.genes[0])));
           mesh.setMatrixAt(k, this.m);
+          // Thick fur looks lighter and shaggier, thin fur darker.
+          const fur = h.genes[1];
+          this.c.setRGB(0.8 + 0.5 * fur, 0.8 + 0.45 * fur, 0.78 + 0.4 * fur);
+          mesh.setColorAt(k, this.c);
           counts[h.species]++;
         }
       }
@@ -447,6 +574,7 @@ export class LifeView {
     for (const sp of SPECIES_IDS) {
       this.animals[sp].count = counts[sp];
       this.animals[sp].instanceMatrix.needsUpdate = true;
+      if (this.animals[sp].instanceColor) this.animals[sp].instanceColor!.needsUpdate = true;
     }
     void camera;
   }

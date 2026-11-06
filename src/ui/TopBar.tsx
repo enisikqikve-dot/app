@@ -2,20 +2,23 @@ import { formatNumber, t, type MessageKey } from '../i18n';
 import { SPEEDS, type SpeedIndex } from '../sim/clock';
 import type { UiState } from '../game/Game';
 import { formatHours } from './format';
-import { IconBook, IconMenu, IconMoon, IconPause, IconPerson, IconRewind, IconSoundOff, IconSoundOn, IconSun } from './icons';
+import { IconBook, IconMenu, IconMoon, IconPause, IconPerson, IconRewind, IconSkip, IconSoundOff, IconSoundOn, IconSun } from './icons';
 
 interface Props {
   ui: UiState;
   rewindOpen: boolean;
   chronicleOpen: boolean;
+  skipOpen: boolean;
   onSpeed: (index: SpeedIndex) => void;
   onChronicle: () => void;
+  onSkip: () => void;
   onMenu: () => void;
   onRewind: () => void;
   onSound: () => void;
 }
 
-export function TopBar({ ui, rewindOpen, chronicleOpen, onSpeed, onChronicle, onMenu, onRewind, onSound }: Props) {
+export function TopBar({ ui, rewindOpen, chronicleOpen, skipOpen, onSpeed, onChronicle, onSkip, onMenu, onRewind, onSound }: Props) {
+  const busy = ui.skip !== null;
   const { date, climate } = ui;
   const climateTemp = Math.round(climate.temperature);
   return (
@@ -43,7 +46,7 @@ export function TopBar({ ui, rewindOpen, chronicleOpen, onSpeed, onChronicle, on
           </span>
         )}
         <span class="epoch">
-          <span class="chip">{t(ui.population > 0 ? 'epoch.paleolithic' : 'top.epoch')}</span>
+          <span class="chip">{t(ui.epoch === 'mesolithic' ? 'epoch.mesolithic' : ui.epoch === 'paleolithic' ? 'epoch.paleolithic' : 'top.epoch')}</span>
           <span class="people" title={t('top.people')}>
             <IconPerson size={15} />
             <span class="mono">{formatNumber(ui.population)}</span>
@@ -59,9 +62,21 @@ export function TopBar({ ui, rewindOpen, chronicleOpen, onSpeed, onChronicle, on
             aria-label={t('rewind.button')}
             title={t('rewind.button')}
             aria-expanded={rewindOpen}
+            disabled={busy}
             onClick={onRewind}
           >
             <IconRewind size={16} />
+          </button>
+          <button
+            type="button"
+            class={`speed-btn skip-btn${skipOpen ? ' is-open' : ''}`}
+            aria-label={t('skip.button')}
+            title={t('skip.button')}
+            aria-expanded={skipOpen}
+            disabled={busy}
+            onClick={onSkip}
+          >
+            <IconSkip size={16} />
           </button>
           {SPEEDS.map((speed, index) => (
             <button
@@ -69,6 +84,7 @@ export function TopBar({ ui, rewindOpen, chronicleOpen, onSpeed, onChronicle, on
               type="button"
               class={`speed-btn${ui.speedIndex === index ? ' is-active' : ''}`}
               aria-pressed={ui.speedIndex === index}
+              disabled={busy}
               aria-label={index === 0 ? t('speed.0') : `${speed}×`}
               title={index === 0 ? `${t('speed.0')} (␣)` : `${speed}×`}
               onClick={() => onSpeed(index as SpeedIndex)}

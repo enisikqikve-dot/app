@@ -34,7 +34,10 @@ export type PowerKind =
   | 'wComfort'
   | 'wEmigrate'
   | 'wPeace'
-  | 'wLead';
+  | 'wLead'
+  | 'wIdea'
+  | 'wTeach'
+  | 'timeSkip';
 
 /**
  * point: tap a place · brush: drag over the land · global: the whole planet at once ·
@@ -92,7 +95,12 @@ export const WHISPER_POWERS: readonly PowerDef[] = [
   { kind: 'wEmigrate', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
   { kind: 'wPeace', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
   { kind: 'wLead', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wIdea', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wTeach', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
 ];
+
+/** Not a power of the palette: skipping time is kept in the history so replays match. */
+export const TIME_SKIP: PowerDef = { kind: 'timeSkip', target: 'global', catastrophe: false, aimKm: 0 };
 
 export const LIFE_POWERS: readonly PowerDef[] = [
   { kind: 'createPeople', target: 'point', catastrophe: false, aimKm: 30, category: 'life' },
@@ -107,6 +115,7 @@ export const ALL_POWERS: readonly PowerDef[] = [
   ...BLESSING_POWERS,
   ...WHISPER_POWERS,
   ...LIFE_POWERS,
+  TIME_SKIP,
 ];
 
 export function powerDef(kind: PowerKind): PowerDef {
@@ -116,7 +125,7 @@ export function powerDef(kind: PowerKind): PowerDef {
 /** Choices some powers offer (how many people, which animal). */
 export const POWER_OPTIONS: Partial<Record<PowerKind, number[]>> = {
   createPeople: [1, 2, 5],
-  spawnAnimals: [0, 1, 2, 3],
+  spawnAnimals: [0, 1, 2, 3, 4],
   sign: [0, 1, 2],
 };
 
@@ -134,7 +143,7 @@ export interface PowerEvent {
   stamps?: number[];
   /** The person a power is aimed at (heal, revive, smite, move). */
   target?: number;
-  /** A chosen option: number of people, the animal species index, the kind of sky sign. */
+  /** A chosen option: number of people, the animal species index, the kind of sky sign, minutes skipped. */
   extra?: number;
   /** A second person (whispered love: whom to love). */
   other?: number;

@@ -19,7 +19,8 @@ import type {
   Person,
   Sex,
 } from '../sim/life/types';
-import { HAIR_GREY } from '../sim/life/types';
+import { HAIR_GREY, type SpeciesId } from '../sim/life/types';
+import { INVENTION_IDS, INVENTIONS, BIT, listOf, type InventionId, type Task } from '../sim/life/inventions';
 
 type Someone = Person | ArchivedPerson;
 
@@ -38,7 +39,17 @@ export type Activity =
   | 'walk.family'
   | 'walk.wander'
   | 'walk.safety'
-  | 'walk.none';
+  | 'walk.hunt'
+  | 'walk.work'
+  | 'walk.none'
+  | 'eat'
+  | 'hunt'
+  | 'fish'
+  | 'build'
+  | 'heal'
+  | 'teach'
+  | 'tinker'
+  | 'fire';
 
 export interface PersonRef {
   id: number;
@@ -92,6 +103,9 @@ export interface PersonInfo {
   height: 'short' | 'average' | 'tall';
   hairNote: { rel: AncestorKey; name: string } | null;
   biome: Biome;
+  know: InventionId[];
+  task: Task | null;
+  teacher: boolean;
   partner: PersonRef | null;
   formerPartners: PersonRef[];
   parents: PersonRef[];
@@ -120,7 +134,7 @@ export interface FamilyTree {
   grandchildren: number;
 }
 
-export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'nature';
+export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'knowledge' | 'animals' | 'nature';
 
 export interface ChronicleLine {
   index: number;
@@ -135,6 +149,32 @@ export interface ChronicleLine {
   category: ChronicleCategory;
   /** The person to open when the line is tapped. */
   person?: number;
+  /** For lines about animal species. */
+  species?: { base: SpeciesId; prefix: string };
+}
+
+/** One invention in the knowledge net. */
+export interface KnowledgeInfo {
+  id: InventionId;
+  needs: InventionId[];
+  /** Living people who know it, and groups that do. */
+  people: number;
+  groups: number;
+  status: 'known' | 'lost' | 'possible' | 'unknown';
+  /** Who first had the idea, and when. */
+  first?: { name: string; year: number };
+}
+
+export interface SpeciesInfo {
+  id: number;
+  base: SpeciesId;
+  prefix: string;
+  animals: number;
+  herds: number;
+  genes: [number, number, number];
+  bornYear: number | null;
+  extinctYear: number | null;
+  createdByYou: boolean;
 }
 
 const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
@@ -152,6 +192,10 @@ const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
   moved: 'groups',
   power: 'nature',
   sign: 'nature',
+  invention: 'knowledge',
+  lost: 'knowledge',
+  species: 'animals',
+  speciesGone: 'animals',
 };
 
 export class PeopleInfo {
@@ -249,6 +293,9 @@ export class PeopleInfo {
       height: x.look.height < 0.96 ? 'short' : x.look.height > 1.05 ? 'tall' : 'average',
       hairNote: this.hairOrigin(x),
       biome: this.planet.biome[living ? living.cell : (x as ArchivedPerson).cell] as Biome,
+      know: listOf(x.know ?? 0),
+      task: living?.alive && this.life.ageOf(x) >= 14 ? (living.task ?? 'gather') : null,
+      teacher: !!living?.teacher && living.teacher > t,
       partner: partnerId >= 0 ? this.ref(life.anyone(partnerId)) : null,
       formerPartners: x.partners.filter((id) => id !== partnerId).map((id) => this.ref(life.anyone(id))).filter((r): r is PersonRef => !!r),
       parents,
@@ -321,9 +368,70 @@ export class PeopleInfo {
     if (e.c !== undefined) line.c = this.name(e.c);
     if (e.n !== undefined) line.n = e.n;
     if (e.s !== undefined) line.s = e.s;
-    if (e.a !== undefined && e.key !== 'power' && e.key !== 'sign') line.person = e.a;
+    if (e.a !== undefined && e.key !== 'power' && e.key !== 'sign' && e.key !== 'species') line.person = e.a;
     else if (e.key === 'power' && e.s === 'revive') line.person = e.a;
+    if ((e.key === 'species' || e.key === 'speciesGone') && e.n !== undefined) {
+      const rec = this.life.speciesRecord(e.n);
+      if (rec) line.species = { base: rec.base, prefix: rec.prefix };
+    }
     return line;
+  }
+
+  /** The knowledge net: what is known, lost, within reach or still unknown. */
+  knowledge(): KnowledgeInfo[] {
+    const life = this.life;
+    const now = life.worldKnows();
+    const ever = life.everKnown;
+    const firsts = new Map<string, { name: string; year: number }>();
+    for (const c of life.chronicle) {
+      if (c.key === 'invention' && c.s && !firsts.has(c.s)) firsts.set(c.s, { name: this.name(c.a) ?? '?', year: dateFromMinutes(c.t).year });
+    }
+    return INVENTION_IDS.map((id) => {
+      let people = 0;
+      const groups = new Set<number>();
+      for (const p of life.people) {
+        if (p.alive && p.know & BIT[id]) {
+          people++;
+          groups.add(p.band);
+        }
+      }
+      const possible = INVENTIONS[id].needs.every((n) => now & BIT[n]);
+      const status: KnowledgeInfo['status'] = now & BIT[id] ? 'known' : ever & BIT[id] ? 'lost' : possible ? 'possible' : 'unknown';
+      const info: KnowledgeInfo = { id, needs: [...INVENTIONS[id].needs], people, groups: groups.size, status };
+      const first = firsts.get(id);
+      if (first) info.first = first;
+      return info;
+    });
+  }
+
+  /** All animal species, living ones first. */
+  species(): SpeciesInfo[] {
+    const life = this.life;
+    const count = new Map<number, { animals: number; herds: number }>();
+    for (const h of life.herds) {
+      const c = count.get(h.kind) ?? { animals: 0, herds: 0 };
+      c.animals += h.count;
+      c.herds++;
+      count.set(h.kind, c);
+    }
+    const madeByYou = new Set<number>();
+    for (const c of life.chronicle) if (c.key === 'species' && c.s === 'god' && c.n !== undefined) madeByYou.add(c.n);
+    return life.species
+      .map((r) => {
+        const c = count.get(r.id) ?? { animals: 0, herds: 0 };
+        return {
+          id: r.id,
+          base: r.base,
+          prefix: r.prefix,
+          animals: c.animals,
+          herds: c.herds,
+          genes: [r.genes[0], r.genes[1], r.genes[2]] as [number, number, number],
+          bornYear: r.born > 0 ? dateFromMinutes(r.born).year : null,
+          extinctYear: r.extinct !== undefined ? dateFromMinutes(r.extinct).year : null,
+          createdByYou: madeByYou.has(r.id),
+        };
+      })
+      .sort((a, b) => (a.extinctYear === null ? 0 : 1) - (b.extinctYear === null ? 0 : 1) || b.animals - a.animals);
   }
 
   /** The newest lines first. */
