@@ -8,7 +8,21 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 8 – Zivilisation ✅
+## Stand: Meilenstein 9 – Durch die Epochen ✅
+
+**Neu: Von der Bronzezeit bis ins digitale Zeitalter, mit Städten, die mit jeder Epoche anders aussehen.**
+
+- **13 neue Erfindungen der Epochen:** Bronze, Eisen, Segelschiffe, Mathematik und Wissenschaft, Heilkunde, Kompass und Hochseefahrt, Buchdruck, Schießpulver, Dampfmaschine, Elektrizität, Impfungen, Flugzeuge, Computer.
+- **Neun Zeitalter** nach der Steinzeit: Jungsteinzeit, frühe Hochkultur, Bronzezeit, Antike, Mittelalter, Frühe Neuzeit, Industriezeitalter, Moderne, digitales Zeitalter.
+  - Jedes Volk lebt in seiner eigenen Epoche. Die Chronik schreibt den Beginn jedes Zeitalters auf.
+  - Realistisch langsam: Vom ersten Feld bis zum Computer vergehen Jahrtausende, das späte Wissen kommt schneller (wie in der echten Geschichte).
+- **Städte im Stil ihrer Zeit:** Lehmhäuser und Stufentempel, Steinhäuser mit Ziegeldach und Säulentempel, Fachwerk mit Kirchtürmen, Backstein mit Schornsteinen, Hochhäuser. Mauern bis ins Mittelalter. Die Hütten der Steinzeit verschwinden aus den Städten.
+- **Kleidung je Epoche:** Leinen, gefärbte Stoffe, dunkle Anzüge, bunte moderne Kleidung (dazu die Farbe des Volkes).
+- **Seefahrt:** Mit Segelschiffen und später dem Kompass fahren Siedler über das Meer und gründen Städte auf anderen Kontinenten. Schiffe kreuzen vor den Küsten, Völker treffen und bekriegen sich über das Meer.
+- **Fortschritt wirkt:** Eisenpflüge, Maschinen und Strom ernähren viel mehr Menschen (Weltbevölkerung bis in die Millionen), Heilkunde und Impfungen lassen Städte schneller wachsen, Schießpulver und Flugzeuge machen Kriege tödlicher.
+- **Schneller gerechnet:** Städte haben Brunnen und Kornspeicher, Stadtbewohner reisen mit Karren oder Schiff heim, ferne Herden werden beim Zeitsprung grober gerechnet. Ein Jahr mit Städten rechnet etwa dreimal so schnell wie vorher.
+
+### Meilenstein 8 – Zivilisation ✅
 
 **Neu: Die Menschen werden sesshaft. Aus Dörfern werden Städte mit Gesetzen, Herrschern, Geld und Märkten.**
 

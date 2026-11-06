@@ -11,7 +11,7 @@ import { Rng } from '../../core/rng';
 import { MINUTES_PER_DAY, MINUTES_PER_YEAR } from '../clock';
 import type { PowerEvent } from '../powers';
 import type { World } from '../world';
-import { CIV_BIT, CIV_IDS, CIV_TECHS, civReady, type CivId } from './civtech';
+import { CIV_BIT, CIV_IDS, CIV_TECHS, EPOCHS, civReady, epochIndex, type CivId } from './civtech';
 import { BIT, INVENTION_IDS } from './inventions';
 import type { Life } from './life';
 import type { Band, Person, Settlement, Tribe } from './types';
@@ -105,7 +105,7 @@ export class CivSystem {
 
   /** How many people a group in a village may have before births happen in the crowd instead. */
   followCap(): number {
-    return Math.max(6, Math.min(22, Math.floor(170 / Math.max(1, this.living().length))));
+    return Math.max(4, Math.min(22, Math.floor(120 / Math.max(1, this.living().length))));
   }
 
   /** In a full village, children are born into the counted crowd. */
@@ -124,7 +124,48 @@ export class CivSystem {
   private techFactor(tribe: Tribe | undefined): number {
     if (!tribe) return 1;
     const k = (id: CivId, f: number) => (this.knows(tribe, id) ? f : 0);
-    return 1 + k('herding', 0.25) + k('wheel', 0.15) + k('masonry', 0.1) + k('weaving', 0.05) + k('writing', 0.05);
+    const farms =
+      1 + k('herding', 0.25) + k('wheel', 0.15) + k('masonry', 0.1) + k('weaving', 0.05) + k('writing', 0.05) + k('iron', 0.2) + k('science', 0.1) + k('navigation', 0.1) + k('printing', 0.05);
+    // Machines feed many more people from the same land, and cities grow upward.
+    const machines = (this.knows(tribe, 'steam') ? 2 : 1) * (this.knows(tribe, 'electricity') ? 2 : 1) * (this.knows(tribe, 'computer') ? 1.5 : 1);
+    return farms * machines;
+  }
+
+  /** How far a people reaches over sea and land to meet, trade, settle and fight (cells). */
+  reach(tribe: Tribe | undefined): number {
+    if (!tribe) return 0;
+    return this.knows(tribe, 'flight') ? 60 : this.knows(tribe, 'navigation') ? 26 : this.knows(tribe, 'sailing') ? 12 : 0;
+  }
+
+  /** Land masses: the same number for cells of one continent (worked out once a year). */
+  private continents: Int32Array | null = null;
+  private continentsYear = -1;
+  continentOf(world: World, cell: number): number {
+    const year = Math.floor(this.life.t / YEAR);
+    if (!this.continents || this.continentsYear !== year) {
+      this.continentsYear = year;
+      const planet = world.planet;
+      const out = new Int32Array(planet.cellCount).fill(-1);
+      let id = 0;
+      for (let c = 0; c < planet.cellCount; c++) {
+        if (out[c] >= 0 || planet.heightM[c] < 0) continue;
+        const stack = [c];
+        out[c] = id;
+        while (stack.length) {
+          const x = stack.pop()!;
+          for (let k = planet.neighborOffsets[x]; k < planet.neighborOffsets[x + 1]; k++) {
+            const n = planet.neighbors[k];
+            if (out[n] < 0 && planet.heightM[n] >= 0) {
+              out[n] = id;
+              stack.push(n);
+            }
+          }
+        }
+        id++;
+      }
+      this.continents = out;
+    }
+    return this.continents[cell];
   }
 
   private newName(id: number): string {
@@ -314,11 +355,13 @@ export class CivSystem {
     // Writing keeps the stone-age knowledge.
     if (this.knows(tribe, 'writing')) tribe.lore = (tribe.lore ?? 0) | stone;
     const tech = tribe.tech ?? 0;
+    // Many peoples search side by side; together they are not that much faster than one.
+    const crowded = 1 / Math.sqrt(Math.max(1, life.tribes.living().length));
     for (const id of civReady(tech, stone)) {
       const def = CIV_TECHS[id];
       if (def.settled && homes.length === 0) continue;
       if (def.minPop && pop < def.minPop) continue;
-      let chance = def.rate * Math.min(3, Math.sqrt(pop / 60)) * (0.6 + tribe.culture[2] / 100);
+      let chance = def.rate * Math.min(3, Math.sqrt(pop / 60)) * (0.6 + tribe.culture[2] / 100) * crowded;
       if (id === 'farming') {
         const seen = bands.reduce((m, b) => Math.max(m, b.seen?.[3] ?? 0), 0);
         chance *= 1 + Math.min(1, seen);
@@ -351,6 +394,12 @@ export class CivSystem {
       }
     }
     if (who && own) life.log(who, 'civInvented', { n: CIV_IDS.indexOf(id) });
+    // A new age of the world begins.
+    const age = epochIndex(tribe.tech);
+    if (age > (life.raw.epochRecord ?? 0)) {
+      life.raw.epochRecord = age;
+      life.chron('epoch', { s: EPOCHS[age - 1][0], x: tribe.id, major: 1 });
+    }
     const firstEver = own && !this.life.tribes.tribes.some((tr) => tr !== tribe && this.knows(tr, id));
     life.chron('civTech', { x: tribe.id, s: id, ...(who && own ? { a: who.id } : {}), ...(from ? { y: from.id } : {}), ...(firstEver ? { major: 1 as const } : {}) });
   }
@@ -389,7 +438,12 @@ export class CivSystem {
     else if (s.fields > maxFields) s.fields -= 1;
     const cap = s.fields * PER_FIELD * techF * (s.blessed !== undefined && s.blessed > t ? 1.3 : 1);
     const herbs = tribe && (tribe.lore ?? 0) & BIT.herbs ? 0.008 : 0;
-    const r = 0.028 + herbs;
+    const healing = (this.knows(tribe, 'medicine') ? 0.004 : 0) + (this.knows(tribe, 'vaccines') ? 0.012 : 0);
+    const r = 0.028 + herbs + healing;
+    // Towns push the wild animals back.
+    if (this.sizeOf(s) >= 1) {
+      for (const h of life.herds) if (h.count > 0 && world.within(h.cell, s.cell, world.kmPerCell * 2.5)) h.count = Math.max(0, Math.floor(h.count * 0.85));
+    }
     let crowd = s.crowd + r * total * (1 - total / Math.max(1, cap));
     if (total > cap) crowd -= (total - cap) * 0.2;
     // Wars and unrest cost lives too.
@@ -424,17 +478,21 @@ export class CivSystem {
     const planet = world.planet;
     let best = -1;
     let bestScore = -Infinity;
+    // Seafarers cross the water to other shores.
+    const sea = this.reach(tribe);
+    const home = this.continentOf(world, from.cell);
     const seen = new Set([from.cell]);
     let frontier = [from.cell];
-    for (let step = 1; step <= 9; step++) {
+    for (let step = 1; step <= 9 + sea; step++) {
       const next: number[] = [];
       for (const c of frontier) {
         for (let k = planet.neighborOffsets[c]; k < planet.neighborOffsets[c + 1]; k++) {
           const n = planet.neighbors[k];
-          if (seen.has(n) || planet.heightM[n] < 0) continue;
+          if (seen.has(n) || (planet.heightM[n] < 0 && !sea)) continue;
           seen.add(n);
           next.push(n);
-          if (step < 4) continue;
+          if (step < 4 || planet.heightM[n] < 0) continue;
+          if (step > 9 && this.continentOf(world, n) === home) continue;
           if (life.waterScore(world, n) <= 0) continue;
           const food = life.capacity(world, n, t);
           if (food < 0.3 || this.living().some((s) => world.within(s.cell, n, world.kmPerCell * 3.5))) continue;
@@ -461,6 +519,7 @@ export class CivSystem {
     const s = this.found(band, tribe, best, t, life.person(band.leader), from);
     s.crowd = Math.min(from.crowd, 10);
     from.crowd -= s.crowd;
+    if (this.continentOf(world, best) !== home) life.chron('overseas', { n: s.id, c: from.id, x: tribe.id, major: 1 });
   }
 
   /** Inequality of wealth (Gini, 0 … 1) among the followed people of a people (or everyone). */

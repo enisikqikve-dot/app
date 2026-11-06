@@ -321,6 +321,8 @@ export class TribeSystem {
   private trade(world: World): void {
     const life = this.life;
     const bands = life.bands;
+    const reach = new Map<number, number>();
+    for (const tr of this.living()) reach.set(tr.id, life.civ.reach(tr));
     for (let i = 0; i < bands.length; i++) {
       const a = bands[i];
       const ca = this.camp(a);
@@ -328,7 +330,9 @@ export class TribeSystem {
       for (let j = i + 1; j < bands.length; j++) {
         const b = bands[j];
         const cb = this.camp(b);
-        if (cb < 0 || !world.within(ca, cb, world.kmPerCell * MEET_CELLS)) continue;
+        // Ships and later aircraft bring faraway peoples together.
+        const far = MEET_CELLS + Math.max(reach.get(a.tribe ?? -1) ?? 0, reach.get(b.tribe ?? -1) ?? 0);
+        if (cb < 0 || !world.within(ca, cb, world.kmPerCell * far)) continue;
         const ta = a.tribe ?? -1;
         const tb = b.tribe ?? -1;
         if (ta !== tb) {
@@ -483,7 +487,7 @@ export class TribeSystem {
         // After a war comes a long truce.
         if (this.wars.some((w) => w.end !== undefined && t - w.end < 30 * YEAR && ((w.a === a.id && w.b === b.id) || (w.a === b.id && w.b === a.id)))) continue;
         const pair = this.nearestGroups(a.id, b.id, world);
-        if (!pair || !world.within(this.camp(pair[0]), this.camp(pair[1]), world.kmPerCell * BATTLE_CELLS)) continue;
+        if (!pair || !world.within(this.camp(pair[0]), this.camp(pair[1]), world.kmPerCell * (BATTLE_CELLS + life.civ.reach(a)))) continue;
         const chief = life.person(a.chief);
         const reason = this.reasonFor(a, b, chief);
         const drive = (a.culture[0] / 60) * (reason ? 1 : 0.3) * (r[1] < -60 ? 1.6 : 1) * (chief ? 0.6 + chief.traits[T_AGGRESSIVE] / 125 : 1);
@@ -564,7 +568,8 @@ export class TribeSystem {
     const pair = this.nearestGroups(w.a, w.b, world);
     if (!pair) return;
     const [ga, gb] = pair;
-    if (!world.within(this.camp(ga), this.camp(gb), world.kmPerCell * BATTLE_CELLS)) return;
+    const reach = Math.max(life.civ.reach(this.tribe(w.a)), life.civ.reach(this.tribe(w.b)));
+    if (!world.within(this.camp(ga), this.camp(gb), world.kmPerCell * (BATTLE_CELLS + reach))) return;
     const fighters = (band: Band) => life.members(band.id).filter((p) => {
       const age = life.ageOf(p);
       return age >= 16 && age <= 55 && !p.pregnant && p.sick <= 0;
@@ -572,9 +577,12 @@ export class TribeSystem {
     const fa = fighters(ga);
     const fb = fighters(gb);
     if (fa.length === 0 || fb.length === 0) return;
+    const civ = life.civ;
     const power = (list: Person[], band: Band, home: boolean) => {
       const know = life.bandKnows(band.id);
-      const arms = 1 + (know & BIT.spear ? 0.3 : 0) + (know & BIT.bow ? 0.4 : 0);
+      const tr = this.tribe(band.tribe);
+      const k = (id: Parameters<typeof civ.knows>[1], f: number) => (civ.knows(tr, id) ? f : 0);
+      const arms = 1 + (know & BIT.spear ? 0.3 : 0) + (know & BIT.bow ? 0.4 : 0) + k('bronze', 0.3) + k('iron', 0.4) + k('gunpowder', 0.9) + k('steam', 0.4) + k('flight', 0.7) + k('computer', 0.4);
       return list.reduce((s, p) => s + 0.5 + p.traits[T_BRAVE] / 200 + p.traits[T_AGGRESSIVE] / 250 + (p.feel?.kind === 'courage' ? 0.4 : 0) - (p.feel?.kind === 'fear' ? 0.3 : 0), 0) * arms * (home ? 1.15 : 1);
     };
     const pa = power(fa, ga, false);
@@ -594,10 +602,12 @@ export class TribeSystem {
     const winTribe = win.tribe!;
     const aSide = winTribe === w.a;
     // The counted inhabitants of their towns fight and fall too.
+    // Later wars are deadlier.
+    const deadly = [w.a, w.b].reduce((m, id) => Math.max(m, civ.knows(this.tribe(id), 'flight') ? 2 : civ.knows(this.tribe(id), 'gunpowder') ? 1.5 : 1), 1);
     const crowdLoss = (band: Band, share: number) => {
       const home = life.civ.homeOf(band.id);
       if (!home) return 0;
-      const n = Math.floor(home.crowd * share * (home.wall ? 0.5 : 1));
+      const n = Math.floor(home.crowd * Math.min(0.4, share * deadly) * (home.wall ? 0.5 : 1));
       home.crowd -= n;
       return n;
     };

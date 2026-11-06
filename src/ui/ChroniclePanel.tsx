@@ -215,7 +215,7 @@ function PeoplesList({ info, onPerson, onPlace }: { info: PeoplesInfo; onPerson:
               </span>
             </div>
             <span class="know-info">
-              <b>{t(`gov.${tr.gov}` as MessageKey)}</b>
+              <span class="chip chip-cond epoch-chip">{t(tr.epoch === 'stone' ? 'epoch.paleolithic' : (`epoch.${tr.epoch}` as MessageKey))}</span> <b>{t(`gov.${tr.gov}` as MessageKey)}</b>
               {tr.unrest > 0.45 ? ` · ${t('peoples.unrest')}` : ''}
             </span>
             <span class="know-info">

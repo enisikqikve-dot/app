@@ -108,6 +108,10 @@ export function chronicleText(l: ChronicleLine, planet: string): string {
       return t('chron.revolt', { a, tribe: l.tribe ?? '?' });
     case 'law':
       return t('chron.law', { tribe: l.tribe ?? '?', law: t(`law.${l.s ?? 'theft'}` as MessageKey) });
+    case 'overseas':
+      return t('chron.overseas', { place: l.place ?? '?', from: l.from ?? '?', tribe: l.tribe ?? '?' });
+    case 'epoch':
+      return t(`chron.epoch.${l.s ?? 'bronze'}` as MessageKey, { tribe: l.tribe ?? '?' });
     case 'speciesGone':
       return t('chron.speciesGone', { species: l.species ? speciesName(l.species.base, l.species.prefix) : '?' });
     default:

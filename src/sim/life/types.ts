@@ -481,7 +481,9 @@ export type ChronicleKey =
   | 'ruler'
   | 'election'
   | 'revolt'
-  | 'law';
+  | 'law'
+  | 'overseas'
+  | 'epoch';
 
 /** One line in the world chronicle. */
 export interface ChronicleEntry {
@@ -573,6 +575,8 @@ export interface LifeData {
   wars?: War[];
   /** Villages, towns and cities. */
   settlements?: Settlement[];
+  /** The latest age any people has reached (index into EPOCHS + 1). */
+  epochRecord?: number;
   /** Append-only: one row of numbers per year (see HISTORY_FIELDS). */
   history?: number[][];
   historyCount?: number;

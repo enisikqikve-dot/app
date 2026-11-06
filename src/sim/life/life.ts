@@ -634,9 +634,20 @@ export class Life {
 
     const herdSteps = Math.floor(tick / HERD_EVERY) - Math.floor(prev / HERD_EVERY);
     if (k > 1 && herdSteps > 0) {
-      // Time skip: each herd moves every other period, twice as far (half the work).
-      const parity = Math.floor(tick / HERD_EVERY) % 2;
-      for (const h of this.data.herds) if (h.count > 0 && h.id % 2 === parity) this.updateHerd(h, world, t, 2 * herdSteps);
+      // Time skip: each herd moves every fourth period, four times as far (a quarter of the work).
+      // Herds far from all people move only every twelfth period (nobody hunts or watches them there).
+      const period = Math.floor(tick / HERD_EVERY);
+      const camps: number[] = [];
+      for (const b of this.data.bands) {
+        const l = this.person(b.leader);
+        if (l?.alive) camps.push(l.cell);
+      }
+      const reach = world.kmPerCell * 6;
+      for (const h of this.data.herds) {
+        if (h.count <= 0) continue;
+        const near = camps.some((c) => world.within(c, h.cell, reach));
+        if (near ? h.id % 4 === period % 4 : h.id % 12 === period % 12) this.updateHerd(h, world, t, (near ? 4 : 12) * herdSteps);
+      }
       if (this.data.herds.some((h) => h.count <= 0)) this.data.herds = this.data.herds.filter((h) => h.count > 0);
     } else {
       for (let i = 0; i < herdSteps; i++) {
@@ -1043,6 +1054,22 @@ export class Life {
     // Needs come first; the group's place is the first choice, as the leader chose it well.
     const leader = this.leaderOf(p);
     const groupCell = leader && world.within(leader.cell, p.cell, world.kmPerCell * 8) ? leader.cell : -1;
+    // A town has wells and granaries: its people drink and eat at home.
+    const town = this.civ.homeOf(p.band);
+    // Far from home (married into another town, across the sea): they travel home by cart or ship.
+    if (town && p.dest === undefined && !world.within(town.cell, p.cell, world.kmPerCell * 3)) {
+      p.cell = town.cell;
+      p.spot = [this.rng.range(-12, 12), this.rng.range(-12, 12)];
+    }
+    if (town && (p.thirst > 0.5 || p.hunger > 0.45)) {
+      if (world.within(town.cell, p.cell, world.kmPerCell * 1.6)) {
+        if (p.thirst > 0.5) return this.start(p, 'drink', t, 60);
+        if (town.price < 250) {
+          p.hunger = Math.max(0, p.hunger - 0.6);
+          return this.start(p, 'eat', t, 60);
+        }
+      } else if (this.goTo(p, world, (c) => c === town.cell, 20, p.thirst > 0.5 ? 'water' : 'food')) return;
+    }
     if (p.thirst > 0.5) {
       if (this.hasWater(world, p.cell, st.raining)) return this.start(p, 'drink', t, 60);
       const groupNear = groupCell >= 0 && world.within(groupCell, p.cell, world.kmPerCell * 2.5);
@@ -2266,6 +2293,8 @@ export class Life {
   /** How many more huts the group wants at its camp (one per three people). */
   private hutsWanted(band: number, camp: number): number {
     if (!(this.bandKnows(band) & BIT.shelter)) return 0;
+    // In a village of brick houses nobody builds huts any more.
+    if (this.bandById.get(band)?.home !== undefined && this.civ.bandKnows(band, 'masonry')) return 0;
     let have = 0;
     for (const s of this.data.structures) if (s.kind === 'hut' && s.cell === camp && s.band === band) have++;
     return Math.ceil(this.stats(band).size / 3) - have;
@@ -2285,7 +2314,9 @@ export class Life {
       // Huts nearby that another group left are taken over.
       for (const s of this.data.structures) if (s.cell === camp && s.band !== band.id && !members.has(s.band)) s.band = band.id;
     }
-    const keep = this.data.structures.filter((s) => s.kind === 'shrine' || t - s.used < (s.kind === 'fire' ? 1 : 4) * YEAR);
+    // Huts and camp fires give way to the houses of a town (the holy stones stay).
+    const modern = (s: Structure) => s.kind !== 'shrine' && this.bandById.get(s.band)?.home !== undefined && this.civ.bandKnows(s.band, 'masonry');
+    const keep = this.data.structures.filter((s) => s.kind === 'shrine' || (t - s.used < (s.kind === 'fire' ? 1 : 4) * YEAR && !modern(s)));
     if (keep.length > MAX_STRUCTURES) keep.splice(0, keep.length - MAX_STRUCTURES);
     this.data.structures = keep;
   }
@@ -2454,6 +2485,12 @@ export class Life {
   // ------------------------------------------------------------ animals
 
   /** The land carries about one herd per twenty land cells. */
+  /** Room for wild herds: fields and towns leave less of it. */
+  private wildCap(): number {
+    const towns = this.data.settlements?.reduce((n, s) => n + (s.ended === undefined ? 1 : 0), 0) ?? 0;
+    return Math.max(40, Math.round(this.herdCap * (1 - 0.6 * Math.min(1, towns / 20))));
+  }
+
   private updateHerdCap(world: World): void {
     let land = 0;
     for (let c = 0; c < world.planet.cellCount; c++) if (world.planet.heightM[c] >= 0) land++;
@@ -2617,7 +2654,7 @@ export class Life {
     const date = dateFromMinutes(t);
     if (date.season === 0 && date.dayOfSeason >= 3 && h.bornYear !== date.year && h.hunger < 0.5) {
       // Fewer young when the land is full of animals.
-      const room = clamp(1 - this.data.herds.length / this.herdCap, 0, 1);
+      const room = clamp(1 - this.data.herds.length / this.wildCap(), 0, 1);
       const young = h.count * (sp.predator ? 0.35 : 0.3) * (0.3 + 0.7 * room) * (1 - h.hunger);
       h.count += Math.floor(young) + (this.rng.chance(young - Math.floor(young)) ? 1 : 0);
       h.bornYear = date.year;
@@ -2668,7 +2705,7 @@ export class Life {
     }
 
     // Big herds split.
-    if (h.count > sp.maxCount && this.data.herds.length < this.herdCap) {
+    if (h.count > sp.maxCount && this.data.herds.length < this.wildCap()) {
       const half = Math.floor(h.count / 2);
       h.count -= half;
       const child = this.addHerd(h.species, h.cell, half, h.genes, h.kind);

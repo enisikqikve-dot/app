@@ -20,7 +20,7 @@ import type {
   Sex,
 } from '../sim/life/types';
 import { HAIR_GREY, type Deity, type GovForm, type LawId, type PrayerNeed, type SpeciesId } from '../sim/life/types';
-import { CIV_IDS, CIV_TECHS, type CivId } from '../sim/life/civtech';
+import { CIV_IDS, CIV_TECHS, epochOf, type CivEpoch, type CivId } from '../sim/life/civtech';
 import { HISTORY_FIELDS } from '../sim/life/civ';
 import { INVENTION_IDS, INVENTIONS, BIT, listOf, type InventionId, type Task } from '../sim/life/inventions';
 
@@ -250,6 +250,7 @@ export interface TribeInfo {
   total: number;
   settlements: SettlementInfo[];
   tech: CivId[];
+  epoch: CivEpoch;
 }
 
 export interface SettlementInfo {
@@ -350,6 +351,8 @@ const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
   election: 'civ',
   revolt: 'conflict',
   law: 'civ',
+  overseas: 'civ',
+  epoch: 'civ',
   religionGone: 'faith',
   answered: 'faith',
 };
@@ -543,14 +546,14 @@ export class PeopleInfo {
     if (e.x !== undefined) line.tribe = tribes.tribe(e.x)?.name;
     if (e.y !== undefined) line.other = tribes.tribe(e.y)?.name;
     if (e.key === 'peace' && e.s) line.winner = tribes.tribe(Number(e.s))?.name;
-    if ((e.key === 'settled' || e.key === 'grew' || e.key === 'colony' || e.key === 'abandoned' || e.key === 'conquered') && e.n !== undefined) {
+    if ((e.key === 'settled' || e.key === 'grew' || e.key === 'colony' || e.key === 'overseas' || e.key === 'abandoned' || e.key === 'conquered') && e.n !== undefined) {
       const h = this.life.civ.settlement(e.n);
       if (h) {
         line.place = h.name;
         line.cell = h.cell;
       }
     }
-    if (e.key === 'colony' && e.c !== undefined) {
+    if ((e.key === 'colony' || e.key === 'overseas') && e.c !== undefined) {
       line.from = this.life.civ.settlement(e.c)?.name;
       line.c = undefined;
     }
@@ -625,6 +628,7 @@ export class PeopleInfo {
           total: s.people + homes.reduce((n, h) => n + Math.floor(h.crowd), 0),
           settlements: homes.map((h) => this.settlementInfo(h)).sort((a, b) => b.people - a.people),
           tech: CIV_IDS.filter((id) => life.civ.knows(tr, id)),
+          epoch: epochOf(tr.tech ?? 0),
           id: tr.id,
           name: tr.name,
           hue: tr.hue,

@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 6. November 2026 · Version 1.0 · Phase: Meilenstein 8 fertig (Zivilisation)
+Stand: 6. November 2026 · Version 1.1 · Phase: Meilenstein 9 fertig (Durch die Epochen)
 
 ---
 
@@ -935,7 +935,7 @@ nächsten Schritte.
 | ✅ 6 | **Glaube** | die Menschen entdecken dich, Schamanen (Stimme der Geister), Religionen je nach deinen Taten, Gebete, die du erhören kannst, heilige Orte mit Steinkreisen, dein Bild bei den Menschen |
 | ✅ 7 | **Stämme & Konflikte** | Völker mit Namen, Farbe, Kultur und Häuptling; Abspaltung; Begegnung und Tauschhandel; Beziehungen zwischen Völkern; Diebstahl, Mord und Verbannung; Kriege mit Schlachten, Unterwerfung und Frieden |
 | ✅ 8 | **Zivilisation** | Ackerbau, Viehzucht, Dörfer und Städte (mit gezählten Einwohnern), Siedler, Geld und Märkte, Arm und Reich, Regierungsformen mit Erbfolge, Wahlen und Putschen, Gesetze, Schrift, Statistiken |
-| 9 | **Durch die Epochen** | Bronzezeit bis Moderne, neue Gebäude und Kleidung, Seefahrt zu anderen Kontinenten, Leistung für große Bevölkerungen |
+| ✅ 9 | **Durch die Epochen** | Bronzezeit bis digitales Zeitalter (13 neue Erfindungen, 9 Zeitalter), Gebäude und Kleidung je Epoche, Seefahrt und Städte auf anderen Kontinenten, Leistung für Millionen Menschen |
 | 10 | **Sci-Fi-Zukunft** | Roboter, KI-Wesen, Cyborgs, Klone, fliegende Städte, Wettermaschinen, Zeitmaschinen |
 | 11 | **Feinschliff** | Musik pro Epoche, Film-Modus, Ich-Perspektive, Welt teilen (Datei und Code), Balancing |
 

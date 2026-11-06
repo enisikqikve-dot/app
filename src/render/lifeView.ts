@@ -16,10 +16,20 @@ import type { Herd, Person, SpeciesId } from '../sim/life/types';
 import { CLOTH_COLORS, HAIR_COLORS, HAIR_GREY } from '../sim/life/types';
 import { MINUTES_PER_DAY, MINUTES_PER_YEAR } from '../sim/clock';
 import { SPECIES_IDS } from '../sim/life/species';
+import { epochIndex } from '../sim/life/civtech';
+import { styleFor } from './styles';
 import type { TerrainView } from './terrain';
 import { R } from './scale';
 
 const PERSON_SCALE = 1.45;
+/** Clothes of later ages: linen, dyed cloth, dark suits, bright modern colours. */
+const EPOCH_CLOTHES = [
+  null,
+  [0xe8dcc0, 0xd8c8a0, 0xb84a3a, 0xf0eadc, 0x8a6a48],
+  [0x7a2e2e, 0x2e4a7a, 0x3e6a3a, 0x6a4a2a, 0x8a7a5a],
+  [0x3a3a40, 0x5a4a3a, 0x2e3a4a, 0x6a6a6a, 0x4a2e2e],
+  [0x3a6ad8, 0xd84a4a, 0xe8b830, 0x2ea86a, 0xe8e8e8],
+];
 const MAX_PEOPLE = 360;
 const MAX_GRAVES = 400;
 const MAX_STRUCTURES = 240;
@@ -273,6 +283,8 @@ export class LifeView {
   private readonly banners: THREE.InstancedMesh;
   /** Colour of each group's people (only when there is more than one people). */
   private tribeColor = new Map<number, THREE.Color>();
+  /** Clothing style of each group (by the age its people lives in). */
+  private bandStyle = new Map<number, number>();
   private readonly flames: THREE.InstancedMesh;
   private readonly fireGlow: THREE.Points;
   private readonly glowPositions: Float32Array;
@@ -408,6 +420,11 @@ export class LifeView {
     const near = cameraDistance < 70;
     // Several peoples: their clothes and banners show their colour.
     this.tribeColor.clear();
+    this.bandStyle.clear();
+    for (const b of life.bands) {
+      const tr = life.tribes.tribe(b.tribe);
+      if (tr?.tech) this.bandStyle.set(b.id, styleFor(epochIndex(tr.tech)));
+    }
     if (life.tribes.living().length > 1) {
       for (const b of life.bands) {
         const tr = life.tribes.tribe(b.tribe);
@@ -467,7 +484,9 @@ export class LifeView {
       this.head.setMatrixAt(n, this.m);
       this.hair.setMatrixAt(n, this.m);
       if (p.alive) {
-        this.c.setHex(CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]);
+        const style = this.bandStyle.get(p.band) ?? 0;
+        const later = EPOCH_CLOTHES[style];
+        this.c.setHex(later ? later[p.look.clothes % later.length] : (CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]));
         const tribe = this.tribeColor.get(p.band);
         if (tribe) this.c.lerp(tribe, 0.45);
         this.body.setColorAt(n, this.c);

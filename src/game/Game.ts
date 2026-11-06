@@ -32,7 +32,7 @@ import { Overlay, World, type ClimateShift } from '../sim/world';
 import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
 import { Life, REVIVE_WINDOW, TICK, type EventOutcome } from '../sim/life/life';
 import type { ChronicleKey, SpeciesId } from '../sim/life/types';
-import { CIV_BIT } from '../sim/life/civtech';
+import { epochOf, type CivEpoch } from '../sim/life/civtech';
 import { PeopleInfo, type ChronicleLine, type CivTechInfo, type FaithInfo, type PeoplesInfo, type SettlementInfo, type StatsInfo, type FamilyTree, type KnowledgeInfo, type PersonInfo, type SpeciesInfo } from './peopleInfo';
 import { BIT } from '../sim/life/inventions';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
@@ -79,7 +79,7 @@ interface MemSnapshot {
 }
 
 /** Chronicle lines that also pop up as a message (if important). */
-const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone', 'religion', 'religionGone', 'answered', 'tribe', 'tribeGone', 'contact', 'murder', 'war', 'battle', 'peace', 'conquered']);
+const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader', 'invention', 'lost', 'species', 'speciesGone', 'religion', 'religionGone', 'answered', 'tribe', 'tribeGone', 'contact', 'murder', 'war', 'battle', 'peace', 'conquered', 'civTech', 'settled', 'grew', 'government', 'revolt', 'overseas', 'epoch']);
 
 /** A running time skip. */
 interface SkipRun {
@@ -137,8 +137,10 @@ export type PlaceCondition =
   | 'blessed'
   | 'plague';
 
+const EPOCH_ORDER: CivEpoch[] = ['stone', 'neolithic', 'civilization', 'bronze', 'antiquity', 'medieval', 'renaissance', 'industrial', 'modern', 'information'];
+
 /** The age the world is in (from what people know). */
-export type Epoch = 'none' | 'paleolithic' | 'mesolithic' | 'neolithic' | 'civilization';
+export type Epoch = 'none' | 'paleolithic' | 'mesolithic' | Exclude<CivEpoch, 'stone'>;
 
 export interface PlaceInfo {
   cell: number;
@@ -1635,9 +1637,18 @@ export class Game {
   /** The age the most advanced people live in. */
   private epochNow(): Epoch {
     if (!this.life || this.life.population() === 0) return 'none';
-    const tech = this.life.tribes.living().reduce((m, tr) => m | (tr.tech ?? 0), 0);
-    if (tech & CIV_BIT.writing) return 'civilization';
-    if (tech & CIV_BIT.farming) return 'neolithic';
+    // The most advanced people sets the age.
+    let best: CivEpoch = 'stone';
+    let bestIndex = -1;
+    for (const tr of this.life.tribes.living()) {
+      const e = epochOf(tr.tech ?? 0);
+      const i = EPOCH_ORDER.indexOf(e);
+      if (i > bestIndex) {
+        bestIndex = i;
+        best = e;
+      }
+    }
+    if (best !== 'stone') return best;
     const k = this.life.worldKnows();
     return k & BIT.bow && k & BIT.fishing ? 'mesolithic' : 'paleolithic';
   }
