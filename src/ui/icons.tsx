@@ -319,3 +319,118 @@ export const IconFollow = (p: IconProps) => (
     <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
   </Icon>
 );
+
+// ---------------------------------------------------------------- milestone 4
+
+export const IconLuck = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 11.5c-1.8-1.8-4.8-2.4-5.6-.6-.8 1.9 1.6 3.6 5.6.6Z" />
+    <path d="M12 11.5c1.8-1.8 4.8-2.4 5.6-.6.8 1.9-1.6 3.6-5.6.6Z" />
+    <path d="M12 11.5c-1.8-1.8-2.4-4.8-.6-5.6 1.9-.8 3.6 1.6.6 5.6Z" />
+    <path d="M12 11.5c-1.8 1.8-2.4 4.8-.6 5.6 1.9.8 3.6-1.6.6-5.6Z" />
+    <path d="M12.5 13.5c.8 2.6 2.2 4.6 4.5 6" />
+  </Icon>
+);
+
+export const IconFertility = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="7" r="3" />
+    <path d="M6.5 20c0-4.5 2.5-7.5 5.5-7.5s5.5 3 5.5 7.5" />
+    <path d="M9.5 16.5c.8.7 1.6 1 2.5 1s1.7-.3 2.5-1" />
+  </Icon>
+);
+
+export const IconSign = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 18a9 9 0 0 1 18 0" />
+    <path d="M6 18a6 6 0 0 1 12 0" />
+    <path d="M9 18a3 3 0 0 1 6 0" />
+  </Icon>
+);
+
+export const IconLove = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />
+  </Icon>
+);
+
+export const IconCourage = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z" />
+    <path d="M12 8v5M9.5 10.5h5" />
+  </Icon>
+);
+
+export const IconFear = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M6 20V10a6 6 0 0 1 12 0v10l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 20Z" />
+    <circle cx="10" cy="10.5" r="0.8" fill="currentColor" />
+    <circle cx="14" cy="10.5" r="0.8" fill="currentColor" />
+    <path d="M10.5 14.5c.9-.7 2.1-.7 3 0" />
+  </Icon>
+);
+
+export const IconAnger = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M8 9.5 10.5 11M16 9.5 13.5 11" />
+    <path d="M9 16.5c1.8-1.3 4.2-1.3 6 0" />
+  </Icon>
+);
+
+export const IconForgive = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 14c3-1 5-3.5 6-7 1 2 1.2 4 .5 6 2-1 4.5-1.5 7.5-1" />
+    <path d="M4 14c2 3 5 4.5 9 4.5 3 0 5.5-1.5 7-4" />
+    <circle cx="16.5" cy="7.5" r="1" fill="currentColor" />
+  </Icon>
+);
+
+export const IconComfort = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="9" cy="7" r="2.5" />
+    <circle cx="15.5" cy="8" r="2.2" />
+    <path d="M4.5 20c0-3.8 2-6.5 4.5-6.5 1.4 0 2.6.8 3.4 2" />
+    <path d="M10.5 20c.3-3.3 2.2-5.5 5-5.5s4.5 2.2 4.5 5.5" />
+    <path d="M10.5 15.5c1.5.3 3 .2 4.2-.5" />
+  </Icon>
+);
+
+export const IconEmigrate = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M5 19c3-1 4-3 4-5s1.5-4 4-4h6" />
+    <path d="m16 7 3 3-3 3" />
+    <circle cx="5" cy="19" r="1.2" fill="currentColor" />
+  </Icon>
+);
+
+export const IconPeace = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 12.5 7 9l3 1.5 3-2 4 1 4 3" />
+    <path d="M7 9v4l3 3c.8.8 2 .8 2.8 0L17 11.5" />
+    <path d="M10 10.5 13 13" />
+  </Icon>
+);
+
+export const IconLead = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 17 3 7l5 4 4-6 4 6 5-4-1 10H4Z" />
+    <path d="M4 20h16" />
+  </Icon>
+);
+
+export const IconBook = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 6.5C10.5 5 8 4.5 4 4.5v13c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2v-13c-4 0-6.5.5-8 2Z" />
+    <path d="M12 6.5v13" />
+  </Icon>
+);
+
+export const IconTree = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="9" y="3" width="6" height="4" rx="1" />
+    <rect x="3" y="16" width="6" height="4" rx="1" />
+    <rect x="15" y="16" width="6" height="4" rx="1" />
+    <path d="M12 7v4.5M6 16v-2.5h12V16" />
+  </Icon>
+);

@@ -5,7 +5,7 @@
 > die Menschen von selbst, von der Steinzeit bis in eine verrückte
 > Sci-Fi-Zukunft. Du schaust zu und greifst ein, wann du willst.
 
-Stand: 6. November 2026 · Version 0.5 · Phase: Meilenstein 3 fertig (Erstes Leben)
+Stand: 6. November 2026 · Version 0.6 · Phase: Meilenstein 4 fertig (Leben & Liebe)
 
 ---
 
@@ -930,7 +930,7 @@ nächsten Schritte.
 | ✅ 1 | **Erster Planet** | ein runder Planet mit Ozeanen, Kontinenten, Bergen und Klimazonen; echte Sonne mit Tag und Nacht; Gott-Kamera für Maus und Touch; Zeitsteuerung; Deutsch und Englisch |
 | ✅ 2 | **Zorn & Natur** ⭐ | die Naturkräfte: Blitz, Regen, Dürre, Sturm, Erdbeben, Vulkan, Flut, Meteorit, Eiszeit, Landschaft formen; spektakuläre Effekte, erste Geräusche, **Zurückspulen** |
 | ✅ 3 | **Erstes Leben** | Pflanzen und Tiere im Ökosystem; 6 Menschen mit Hunger, Durst und Schlaf; Symbol-Blasen und Akte; Segen und Leben & Tod; Folgen-Modus. Glück, Fruchtbarkeit und Himmelszeichen folgen mit Meilenstein 4 |
-| 4 | **Leben & Liebe** | Charakter, Gefühle, Beziehungen, Altern und Tod, Kinder mit Vererbung, Stammbaum, Weltchronik, Gedanken flüstern |
+| ✅ 4 | **Leben & Liebe** | Charakter, Gefühle, Beziehungen, Altern und Tod, Kinder mit Vererbung, Stammbaum, Weltchronik, Gedanken flüstern; dazu Glück, Fruchtbarkeit und Himmelszeichen. Ideen und „Lehrer werden“ folgen mit Meilenstein 5 |
 | 5 | **Wissen & lange Zeiten** | Erfindungen entstehen von selbst, Wissen wird weitergegeben, Arbeit nach Bedarf, erste Hütten und Feuerstellen; **Zeitsprung**; Evolution der Tiere |
 | 6 | **Glaube** | die Menschen entdecken dich, Schamanen, Religionen, Gebete, heilige Orte |
 | 7 | **Stämme & Konflikte** | Anführer, Abspaltung, mehrere Völker, Tauschhandel, Streit, Verbrechen, Krieg |

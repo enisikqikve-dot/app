@@ -2,7 +2,19 @@ import type { ComponentType } from 'preact';
 import { t, type MessageKey } from '../i18n';
 import { ALL_POWERS, type PowerCategory, type PowerKind } from '../sim/powers';
 import {
+  IconAnger,
   IconAnimals,
+  IconComfort,
+  IconCourage,
+  IconEmigrate,
+  IconFear,
+  IconFertility,
+  IconForgive,
+  IconLead,
+  IconLove,
+  IconLuck,
+  IconPeace,
+  IconSign,
   IconCreatePeople,
   IconDrought,
   IconFire,
@@ -49,6 +61,18 @@ export const POWER_ICONS: Record<PowerKind, ComponentType<{ size?: number }>> = 
   smite: IconSmite,
   plague: IconPlague,
   move: IconHand,
+  luck: IconLuck,
+  fertility: IconFertility,
+  sign: IconSign,
+  wLove: IconLove,
+  wCourage: IconCourage,
+  wFear: IconFear,
+  wAnger: IconAnger,
+  wForgive: IconForgive,
+  wComfort: IconComfort,
+  wEmigrate: IconEmigrate,
+  wPeace: IconPeace,
+  wLead: IconLead,
 };
 
 const GROUPS: Record<PowerCategory, { key: MessageKey; kinds: PowerKind[] }[]> = {
@@ -58,7 +82,14 @@ const GROUPS: Record<PowerCategory, { key: MessageKey; kinds: PowerKind[] }[]> =
     { key: 'powers.group.land', kinds: ['raise', 'lower', 'forest'] },
     { key: 'powers.group.climate', kinds: ['iceAge', 'heatAge'] },
   ],
-  blessing: [{ key: 'powers.group.blessing', kinds: ['harvest', 'heal', 'revive'] }],
+  blessing: [
+    { key: 'powers.group.blessing', kinds: ['harvest', 'heal', 'luck', 'fertility'] },
+    { key: 'powers.group.miracles', kinds: ['revive', 'sign'] },
+  ],
+  whisper: [
+    { key: 'powers.group.feelings', kinds: ['wLove', 'wCourage', 'wFear', 'wAnger', 'wForgive', 'wComfort'] },
+    { key: 'powers.group.intentions', kinds: ['wEmigrate', 'wPeace', 'wLead'] },
+  ],
   life: [
     { key: 'powers.group.people', kinds: ['createPeople', 'move', 'smite'] },
     { key: 'powers.group.animals', kinds: ['spawnAnimals'] },
@@ -69,19 +100,23 @@ const GROUPS: Record<PowerCategory, { key: MessageKey; kinds: PowerKind[] }[]> =
 const TITLES: Record<PowerCategory, MessageKey> = {
   nature: 'palette.nature',
   blessing: 'palette.blessing',
+  whisper: 'palette.whisper',
   life: 'palette.life',
 };
 
 interface Props {
   category: PowerCategory;
   armed: PowerKind | null;
+  /** The person the palette was opened for (from their file), if any. */
+  forName?: string | null;
   onPick: (kind: PowerKind) => void;
 }
 
-export function PowerPalette({ category, armed, onPick }: Props) {
+export function PowerPalette({ category, armed, forName, onPick }: Props) {
   return (
     <section class="palette glass-strong" aria-label={t(TITLES[category])}>
       <h2 class="palette-title">{t(TITLES[category])}</h2>
+      {forName && <p class="palette-for">{t('palette.for', { name: forName })}</p>}
       {GROUPS[category].map((group) => (
         <div class="palette-group" key={group.key}>
           <h3>{t(group.key)}</h3>
@@ -108,6 +143,7 @@ export function PowerPalette({ category, armed, onPick }: Props) {
           {group.kinds.length === 1 && <p class="note">{t(`powerInfo.${group.kinds[0]}` as MessageKey)}</p>}
         </div>
       ))}
+      {category === 'whisper' && <p class="note">{t('palette.whisperNote')}</p>}
     </section>
   );
 }

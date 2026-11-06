@@ -67,6 +67,7 @@ export function sanitizeEvents(raw: unknown, cellCount = Infinity): PowerEvent[]
     const event: PowerEvent = { id: x.id, kind: x.kind as PowerEvent['kind'], minutes: x.minutes, cell: Math.floor(x.cell), seed: x.seed >>> 0 };
     if (isFiniteNumber(x.target)) event.target = x.target;
     if (isFiniteNumber(x.extra)) event.extra = x.extra;
+    if (isFiniteNumber(x.other)) event.other = x.other;
     if (Array.isArray(x.stamps)) {
       event.stamps = x.stamps.filter((c): c is number => isFiniteNumber(c) && c >= 0 && c < cellCount).map((c) => Math.floor(c));
     }

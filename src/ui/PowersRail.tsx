@@ -16,7 +16,7 @@ const GROUPS: Group[] = [
   { key: 'powers.nature', Icon: IconNature, category: 'nature' },
   { key: 'powers.blessing', Icon: IconBlessing, category: 'blessing' },
   { key: 'powers.life', Icon: IconLife, category: 'life' },
-  { key: 'powers.whisper', Icon: IconWhisper, category: null, milestone: 4 },
+  { key: 'powers.whisper', Icon: IconWhisper, category: 'whisper' },
 ];
 
 interface Props {

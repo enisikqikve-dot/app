@@ -22,15 +22,28 @@ export type PowerKind =
   | 'spawnAnimals'
   | 'smite'
   | 'plague'
-  | 'move';
+  | 'move'
+  | 'luck'
+  | 'fertility'
+  | 'sign'
+  | 'wLove'
+  | 'wCourage'
+  | 'wFear'
+  | 'wAnger'
+  | 'wForgive'
+  | 'wComfort'
+  | 'wEmigrate'
+  | 'wPeace'
+  | 'wLead';
 
 /**
  * point: tap a place · brush: drag over the land · global: the whole planet at once ·
- * person: tap a living person · dead: tap someone who died recently · carry: tap a person, then a place.
+ * person: tap a living person · dead: tap someone who died recently · carry: tap a person, then a place ·
+ * pair: tap a person, then another person.
  */
-export type PowerTarget = 'point' | 'brush' | 'global' | 'person' | 'dead' | 'carry';
+export type PowerTarget = 'point' | 'brush' | 'global' | 'person' | 'dead' | 'carry' | 'pair';
 
-export type PowerCategory = 'nature' | 'blessing' | 'life';
+export type PowerCategory = 'nature' | 'blessing' | 'whisper' | 'life';
 
 export interface PowerDef {
   kind: PowerKind;
@@ -63,6 +76,22 @@ export const BLESSING_POWERS: readonly PowerDef[] = [
   { kind: 'harvest', target: 'point', catastrophe: false, aimKm: 400, category: 'blessing' },
   { kind: 'heal', target: 'point', catastrophe: false, aimKm: 170, category: 'blessing' },
   { kind: 'revive', target: 'dead', catastrophe: false, aimKm: 0, category: 'blessing' },
+  { kind: 'luck', target: 'person', catastrophe: false, aimKm: 0, category: 'blessing' },
+  { kind: 'fertility', target: 'person', catastrophe: false, aimKm: 0, category: 'blessing' },
+  { kind: 'sign', target: 'point', catastrophe: false, aimKm: 500, category: 'blessing' },
+];
+
+/** Whispered thoughts: invisible, they feel like the person's own. */
+export const WHISPER_POWERS: readonly PowerDef[] = [
+  { kind: 'wLove', target: 'pair', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wCourage', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wFear', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wAnger', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wForgive', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wComfort', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wEmigrate', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wPeace', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
+  { kind: 'wLead', target: 'person', catastrophe: false, aimKm: 0, category: 'whisper' },
 ];
 
 export const LIFE_POWERS: readonly PowerDef[] = [
@@ -76,6 +105,7 @@ export const LIFE_POWERS: readonly PowerDef[] = [
 export const ALL_POWERS: readonly PowerDef[] = [
   ...NATURE_POWERS.map((p) => ({ ...p, category: 'nature' as const })),
   ...BLESSING_POWERS,
+  ...WHISPER_POWERS,
   ...LIFE_POWERS,
 ];
 
@@ -87,6 +117,7 @@ export function powerDef(kind: PowerKind): PowerDef {
 export const POWER_OPTIONS: Partial<Record<PowerKind, number[]>> = {
   createPeople: [1, 2, 5],
   spawnAnimals: [0, 1, 2, 3],
+  sign: [0, 1, 2],
 };
 
 /** One use of a power. The world is the start planet plus all events, in order. */
@@ -103,6 +134,8 @@ export interface PowerEvent {
   stamps?: number[];
   /** The person a power is aimed at (heal, revive, smite, move). */
   target?: number;
-  /** A chosen option: number of people, or the animal species index. */
+  /** A chosen option: number of people, the animal species index, the kind of sky sign. */
   extra?: number;
+  /** A second person (whispered love: whom to love). */
+  other?: number;
 }

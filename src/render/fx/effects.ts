@@ -278,7 +278,7 @@ export class MeteorFx implements Effect {
 }
 
 /** Short bursts made only of particles (eruption start, quake dust, splashes, sparkles). */
-export type BurstKind = 'eruption' | 'dust' | 'splash' | 'sparkle' | 'chill' | 'heat' | 'gold' | 'heal' | 'plague' | 'spirit';
+export type BurstKind = 'eruption' | 'dust' | 'splash' | 'sparkle' | 'chill' | 'heat' | 'gold' | 'heal' | 'plague' | 'spirit' | 'whisper';
 
 export function burst(ctx: FxContext, kind: BurstKind, p: THREE.Vector3, scale = 1): void {
   const n = p.clone().normalize();
@@ -308,6 +308,16 @@ export function burst(ctx: FxContext, kind: BurstKind, p: THREE.Vector3, scale =
       randomUnit(v).multiplyScalar(0.9).add(n).normalize().multiplyScalar(0.6 + Math.random() * 1.6);
       const j = randomUnit().multiplyScalar(Math.random() * 3 * scale);
       ctx.smoke.spawn({ x: p.x + j.x, y: p.y + j.y, z: p.z + j.z, vx: v.x, vy: v.y, vz: v.z, life: 4 + Math.random() * 4, size: 1.5, endSize: 5, color: new THREE.Color(0x9fb24a), endColor: new THREE.Color(0x4f5a2a), alpha: 0.55, gravity: -0.15, drag: 1.2 });
+    }
+  } else if (kind === 'whisper') {
+    // A faint shimmer around the head: only the god sees it.
+    for (let i = 0; i < 26 * scale; i++) {
+      const [ta, tb] = tangents(n);
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.25 + Math.random() * 0.35;
+      const q = p.clone().addScaledVector(n, 0.35 + Math.random() * 0.3).addScaledVector(ta, Math.cos(a) * r).addScaledVector(tb, Math.sin(a) * r);
+      v.copy(ta).multiplyScalar(-Math.sin(a) * 0.6).addScaledVector(tb, Math.cos(a) * 0.6).addScaledVector(n, 0.25);
+      ctx.sparks.spawn({ x: q.x, y: q.y, z: q.z, vx: v.x, vy: v.y, vz: v.z, life: 1 + Math.random() * 0.8, size: 0.09, endSize: 0.01, color: new THREE.Color(0xdde8ff), endColor: new THREE.Color(0x9fb4ff), drag: 1 });
     }
   } else if (kind === 'spirit') {
     // A column of light: revival, the invisible hand.

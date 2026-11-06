@@ -1,0 +1,336 @@
+/**
+ * What the interface shows about people: the person file (Akte), the family
+ * tree and the lines of the world chronicle. Built from the living world on
+ * demand; plain data, no text (the interface translates it).
+ */
+import { dateFromMinutes, type CalendarDate } from '../sim/clock';
+import type { PlanetData } from '../sim/planet/generate';
+import type { Biome } from '../sim/planet/biomes';
+import { phaseOf, REVIVE_WINDOW, type Life, type LifePhase } from '../sim/life/life';
+import type { MoodReasonKey } from '../sim/life/mood';
+import type {
+  ArchivedPerson,
+  ChatKind,
+  ChronicleEntry,
+  ChronicleKey,
+  DeathCause,
+  FeelingKind,
+  LogKey,
+  Person,
+  Sex,
+} from '../sim/life/types';
+import { HAIR_GREY } from '../sim/life/types';
+
+type Someone = Person | ArchivedPerson;
+
+const isLiving = (x: Someone): x is Person => 'alive' in x;
+
+export type Activity =
+  | 'idle'
+  | 'rest'
+  | 'sleep'
+  | 'drink'
+  | 'gather'
+  | 'carried'
+  | 'walk.water'
+  | 'walk.food'
+  | 'walk.group'
+  | 'walk.family'
+  | 'walk.wander'
+  | 'walk.safety'
+  | 'walk.none';
+
+export interface PersonRef {
+  id: number;
+  name: string;
+  sex: Sex;
+  alive: boolean;
+  age: number;
+}
+
+export interface RelationInfo extends PersonRef {
+  opinion: number;
+}
+
+/** Whose hair color someone has (it can skip generations). */
+export type AncestorKey = 'mother' | 'father' | 'grandmother' | 'grandfather' | 'greatGrandmother' | 'greatGrandfather';
+
+export interface PersonInfo {
+  id: number;
+  name: string;
+  sex: Sex;
+  age: number;
+  bornYear: number;
+  diedYear: number | null;
+  phase: LifePhase;
+  alive: boolean;
+  /** Died long ago: only the archive remains. */
+  archived: boolean;
+  cause: DeathCause | null;
+  revivable: boolean;
+  activity: Activity;
+  chat: { kind: ChatKind; name: string } | null;
+  food: number;
+  water: number;
+  sleep: number;
+  health: number;
+  company: number;
+  sick: boolean;
+  mood: number;
+  moodReasons: { key: MoodReasonKey; v: number; name?: string }[];
+  traits: number[];
+  pregnant: boolean;
+  lucky: boolean;
+  leader: boolean;
+  feeling: FeelingKind | null;
+  band: { leader: string; size: number } | null;
+  skin: 0 | 1 | 2;
+  /** Hair color shown now (grey in old age). */
+  hair: number;
+  /** Hair color from the genes. */
+  birthHair: number;
+  height: 'short' | 'average' | 'tall';
+  hairNote: { rel: AncestorKey; name: string } | null;
+  biome: Biome;
+  partner: PersonRef | null;
+  formerPartners: PersonRef[];
+  parents: PersonRef[];
+  siblings: PersonRef[];
+  children: PersonRef[];
+  friends: RelationInfo[];
+  foes: RelationInfo[];
+  log: { date: CalendarDate; key: LogKey; cause?: DeathCause; other?: string; second?: string; n?: number }[];
+}
+
+export interface TreeNode extends PersonRef {
+  bornYear: number;
+  diedYear: number | null;
+  hair: number;
+}
+
+export interface FamilyTree {
+  focus: TreeNode;
+  /** Father's father, father's mother, mother's father, mother's mother (null if unknown). */
+  grandparents: (TreeNode | null)[];
+  /** Mother and father (null if unknown). */
+  parents: (TreeNode | null)[];
+  siblings: TreeNode[];
+  partners: TreeNode[];
+  children: TreeNode[];
+  grandchildren: number;
+}
+
+export type ChronicleCategory = 'people' | 'love' | 'death' | 'groups' | 'nature';
+
+export interface ChronicleLine {
+  index: number;
+  date: CalendarDate;
+  key: ChronicleKey;
+  a?: string;
+  b?: string;
+  c?: string;
+  n?: number;
+  s?: string;
+  major: boolean;
+  category: ChronicleCategory;
+  /** The person to open when the line is tapped. */
+  person?: number;
+}
+
+const CATEGORY: Record<ChronicleKey, ChronicleCategory> = {
+  founders: 'people',
+  newcomers: 'people',
+  birth: 'people',
+  twins: 'people',
+  population: 'people',
+  couple: 'love',
+  separated: 'love',
+  death: 'death',
+  extinct: 'death',
+  leader: 'groups',
+  emigrate: 'groups',
+  moved: 'groups',
+  power: 'nature',
+  sign: 'nature',
+};
+
+export class PeopleInfo {
+  constructor(
+    private readonly life: Life,
+    private readonly planet: PlanetData,
+  ) {}
+
+  private ref(x: Someone | undefined): PersonRef | null {
+    if (!x) return null;
+    return { id: x.id, name: x.name, sex: x.sex, alive: isLiving(x) && x.alive, age: Math.floor(this.life.ageOf(x)) };
+  }
+
+  private name(id: number | undefined): string | undefined {
+    if (id === undefined || id < 0) return undefined;
+    return this.life.anyone(id)?.name;
+  }
+
+  private siblingsOf(x: Someone): Someone[] {
+    const out = new Map<number, Someone>();
+    for (const pid of [x.mother, x.father]) {
+      if (pid < 0) continue;
+      for (const c of this.life.childrenOf(pid)) if (c.id !== x.id) out.set(c.id, c);
+    }
+    return [...out.values()].sort((a, b) => a.born - b.born);
+  }
+
+  /** The nearest ancestor with the same hair color as someone's genes show. */
+  private hairOrigin(x: Someone): PersonInfo['hairNote'] {
+    const look = x.look.hair;
+    const parent = (id: number) => (id >= 0 ? this.life.anyone(id) : undefined);
+    const gens: [Someone | undefined, AncestorKey][] = [];
+    const m = parent(x.mother);
+    const f = parent(x.father);
+    gens.push([m, 'mother'], [f, 'father']);
+    const grand = [m, f].flatMap((p) => (p ? [parent(p.mother), parent(p.father)] : []));
+    for (const g of grand) if (g) gens.push([g, g.sex === 'f' ? 'grandmother' : 'grandfather']);
+    const great = grand.flatMap((p) => (p ? [parent(p.mother), parent(p.father)] : []));
+    for (const g of great) if (g) gens.push([g, g.sex === 'f' ? 'greatGrandmother' : 'greatGrandfather']);
+    for (const [who, rel] of gens) if (who && who.look.hair === look) return { rel, name: who.name };
+    return null;
+  }
+
+  person(x: Someone): PersonInfo {
+    const life = this.life;
+    const t = life.t;
+    const living = isLiving(x) ? x : null;
+    const alive = !!living?.alive;
+    const age = Math.floor(life.ageOf(x));
+    const activity: Activity = !living || !alive ? 'idle' : living.action === 'walk' ? (`walk.${living.goal}` as Activity) : (living.action as Activity);
+    const mood = living && alive ? life.mood(living) : { value: 50, reasons: [] };
+    const partnerId = living ? living.partner : -1;
+    const parents = [x.mother, x.father].map((id) => (id >= 0 ? this.ref(life.anyone(id)) : null)).filter((r): r is PersonRef => !!r);
+    const rels = living ? [...living.rels].sort((a, b) => b[1] - a[1]) : [];
+    const family = new Set<number>([partnerId, x.mother, x.father, ...this.siblingsOf(x).map((s) => s.id), ...life.childrenOf(x.id).map((c) => c.id)]);
+    const relInfo = (id: number, opinion: number): RelationInfo | null => {
+      const r = this.ref(life.anyone(id));
+      return r ? { ...r, opinion } : null;
+    };
+    const band = living ? life.band(living.band) : undefined;
+    const leader = band ? life.anyone(band.leader) : undefined;
+    const hairNow = age >= 52 ? HAIR_GREY : x.look.hair;
+    const died = living ? living.died : (x as ArchivedPerson).died;
+    return {
+      id: x.id,
+      name: x.name,
+      sex: x.sex,
+      age,
+      bornYear: dateFromMinutes(Math.max(0, x.born)).year,
+      diedYear: died !== undefined ? dateFromMinutes(died).year : null,
+      phase: phaseOf(life.ageOf(x)),
+      alive,
+      archived: !living,
+      cause: living ? (living.cause ?? null) : (x as ArchivedPerson).cause,
+      revivable: !!living && !alive && died !== undefined && t - died <= REVIVE_WINDOW,
+      activity,
+      chat: living?.chat && alive ? { kind: living.chat.kind, name: this.name(living.chat.with) ?? '' } : null,
+      food: living ? 1 - living.hunger : 0,
+      water: living ? 1 - living.thirst : 0,
+      sleep: living ? living.energy : 0,
+      health: living ? Math.max(0, living.health) : 0,
+      company: living ? 1 - living.social : 0,
+      sick: !!living && living.sick > 0,
+      mood: mood.value,
+      moodReasons: mood.reasons.map((r) => ({ key: r.key, v: r.v, name: this.name(r.other) })),
+      traits: [...x.traits],
+      pregnant: !!living?.pregnant,
+      lucky: living?.luck !== undefined,
+      leader: !!living && alive && life.isLeader(living),
+      feeling: living?.feel?.kind ?? null,
+      band: alive && band && leader ? { leader: leader.name, size: life.bandSize(band.id) } : null,
+      skin: x.look.skin < 0.34 ? 0 : x.look.skin < 0.67 ? 1 : 2,
+      hair: hairNow,
+      birthHair: x.look.hair,
+      height: x.look.height < 0.96 ? 'short' : x.look.height > 1.05 ? 'tall' : 'average',
+      hairNote: this.hairOrigin(x),
+      biome: this.planet.biome[living ? living.cell : (x as ArchivedPerson).cell] as Biome,
+      partner: partnerId >= 0 ? this.ref(life.anyone(partnerId)) : null,
+      formerPartners: x.partners.filter((id) => id !== partnerId).map((id) => this.ref(life.anyone(id))).filter((r): r is PersonRef => !!r),
+      parents,
+      siblings: this.siblingsOf(x).map((s) => this.ref(s)!),
+      children: life.childrenOf(x.id).map((c) => this.ref(c)!),
+      friends: rels.filter(([id, v]) => v >= 35 && !family.has(id) && !!life.person(id)?.alive).slice(0, 5).map(([id, v]) => relInfo(id, v)).filter((r): r is RelationInfo => !!r),
+      foes: rels.filter(([id, v]) => v <= -25 && !family.has(id) && !!life.person(id)?.alive).reverse().slice(0, 5).map(([id, v]) => relInfo(id, v)).filter((r): r is RelationInfo => !!r),
+      log: [...x.log]
+        .reverse()
+        .slice(0, 16)
+        .map((l) => ({
+          date: dateFromMinutes(l.t),
+          key: l.key,
+          cause: l.cause,
+          other: this.name(l.other),
+          second: l.key === 'born' || l.key === 'twins' ? this.name(l.n) : undefined,
+          n: l.n,
+        })),
+    };
+  }
+
+  private node(x: Someone): TreeNode {
+    const living = isLiving(x) ? x : null;
+    const died = living ? living.died : (x as ArchivedPerson).died;
+    const age = this.life.ageOf(x);
+    return {
+      id: x.id,
+      name: x.name,
+      sex: x.sex,
+      alive: !!living?.alive,
+      age: Math.floor(age),
+      bornYear: dateFromMinutes(Math.max(0, x.born)).year,
+      diedYear: died !== undefined ? dateFromMinutes(died).year : null,
+      hair: age >= 52 ? HAIR_GREY : x.look.hair,
+    };
+  }
+
+  familyTree(id: number): FamilyTree | null {
+    const life = this.life;
+    const x = life.anyone(id);
+    if (!x) return null;
+    const get = (pid: number) => (pid >= 0 ? life.anyone(pid) : undefined);
+    const mother = get(x.mother);
+    const father = get(x.father);
+    const gp = (p: Someone | undefined) => (p ? [get(p.father), get(p.mother)] : [undefined, undefined]);
+    const children = life.childrenOf(x.id);
+    let grandchildren = 0;
+    for (const c of children) grandchildren += life.childrenOf(c.id).length;
+    return {
+      focus: this.node(x),
+      grandparents: [...gp(father), ...gp(mother)].map((g) => (g ? this.node(g) : null)),
+      parents: [mother ? this.node(mother) : null, father ? this.node(father) : null],
+      siblings: this.siblingsOf(x).map((s) => this.node(s)),
+      partners: x.partners.map((pid) => get(pid)).filter((p): p is Someone => !!p).map((p) => this.node(p)),
+      children: children.map((c) => this.node(c)),
+      grandchildren,
+    };
+  }
+
+  chronicleLine(e: ChronicleEntry, index: number): ChronicleLine {
+    const line: ChronicleLine = {
+      index,
+      date: dateFromMinutes(e.t),
+      key: e.key,
+      major: !!e.major,
+      category: CATEGORY[e.key],
+    };
+    if (e.a !== undefined) line.a = this.name(e.a);
+    if (e.b !== undefined) line.b = this.name(e.b);
+    if (e.c !== undefined) line.c = this.name(e.c);
+    if (e.n !== undefined) line.n = e.n;
+    if (e.s !== undefined) line.s = e.s;
+    if (e.a !== undefined && e.key !== 'power' && e.key !== 'sign') line.person = e.a;
+    else if (e.key === 'power' && e.s === 'revive') line.person = e.a;
+    return line;
+  }
+
+  /** The newest lines first. */
+  chronicle(limit = 400): ChronicleLine[] {
+    const all = this.life.chronicle;
+    const out: ChronicleLine[] = [];
+    for (let i = all.length - 1; i >= 0 && out.length < limit; i--) out.push(this.chronicleLine(all[i], i));
+    return out;
+  }
+}

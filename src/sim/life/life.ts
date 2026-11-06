@@ -1,14 +1,18 @@
 /**
- * The living world: people and animal herds.
+ * The living world: people, their groups and animal herds.
  *
  * Runs in fixed steps of 20 game minutes and draws all randomness from one
  * stored generator, so the same start plus the same events always gives the
  * same story. That is what makes rewinding and saving possible.
  *
- * People (milestone 3): hunger, thirst, sleep and health. They look for
- * water and food, sleep at night, stay with their group, flee from fire and
- * floods, get sick, and can die. Animals live in herds that graze, wander,
- * have young in spring and are hunted by wolves.
+ * People have needs (hunger, thirst, sleep, company), a character, a mood
+ * made of many small reasons, opinions of each other and a memory of what
+ * happened to them. They talk, flirt, quarrel and comfort each other, become
+ * couples, have children who inherit looks and character, grow old and die.
+ * Each group follows a leader; crowded groups split and move away.
+ *
+ * Animals live in herds that graze, wander, have young in spring and are
+ * hunted by wolves.
  */
 import { DAYS_PER_YEAR, MINUTES_PER_DAY, dateFromMinutes, localSolarHours, seasonSignal, sunLongitude } from '../clock';
 import { currentTemperature, longitudeOf } from '../planet/generate';
@@ -16,29 +20,92 @@ import { Biome } from '../planet/biomes';
 import { FRESH_NONE } from '../planet/rivers';
 import { Rng } from '../../core/rng';
 import type { World } from '../world';
-import type { PowerEvent } from '../powers';
+import type { PowerEvent, PowerKind } from '../powers';
 import { personName } from './names';
 import { SPECIES, SPECIES_IDS, habitatScore } from './species';
-import type { DeathCause, FoodEntry, Herd, LifeData, LogKey, Person, Sex, SpeciesId } from './types';
-import { CLOTH_COLORS, HAIR_COLORS } from './types';
+import { childLook, childTraits, founderLook, hashUnit, randomTraits, type RandomSource } from './genetics';
+import { FLAG_FREEZING, moodReasons, moodValue, type MoodReason } from './mood';
+import type {
+  ArchivedPerson,
+  Band,
+  ChatKind,
+  ChronicleEntry,
+  ChronicleKey,
+  DeathCause,
+  FoodEntry,
+  Herd,
+  LifeData,
+  LogEntry,
+  LogKey,
+  MoodKey,
+  Person,
+  Sex,
+  SpeciesId,
+} from './types';
+import { T_AGGRESSIVE, T_AMBITIOUS, T_BRAVE, T_CLEVER, T_CURIOUS, T_KIND, TRAITS } from './types';
 
 /** Simulation step in game minutes. */
 export const TICK = 20;
 const DAY = MINUTES_PER_DAY;
 const YEAR = DAY * DAYS_PER_YEAR;
+const TICKS_PER_DAY = DAY / TICK;
 const HERD_EVERY = 6;
 const HERD_DT = TICK * HERD_EVERY;
 const WALK_KM_PER_TICK = 2.2;
 const FOOD_REGROW = 6 * DAY;
 const MAX_PEOPLE = 300;
 const MAX_HERDS = 500;
-const MAX_LOG = 30;
+const MAX_LOG = 24;
+const MAX_RELS = 16;
 /** A person can be revived for this long after death. */
 export const REVIVE_WINDOW = 5 * DAY;
+/** Three quarters of a year. */
+export const PREGNANCY = 30 * DAY;
+/** Age (years) from which people can become a couple, and lead or leave a group. */
+export const ADULT_AGE = 16;
 
 const FLAG_STARVING = 1;
 const FLAG_PARCHED = 2;
-const FLAG_FREEZING = 4;
+
+/** Lines in the life story that are kept when someone is archived. */
+const MAJOR_LOG = new Set<LogKey>([
+  'created',
+  'born',
+  'partner',
+  'separated',
+  'childBorn',
+  'twins',
+  'grief',
+  'leader',
+  'emigrated',
+  'lucky',
+  'blessedChild',
+  'healed',
+  'revived',
+  'carried',
+  'inLove',
+  'madePeace',
+  'died',
+]);
+
+/** Powers that the chronicle mentions. */
+const CHRONICLED: ReadonlySet<PowerKind> = new Set<PowerKind>([
+  'fire',
+  'storm',
+  'quake',
+  'volcano',
+  'tsunami',
+  'meteor',
+  'iceAge',
+  'heatAge',
+  'drought',
+  'harvest',
+  'heal',
+  'plague',
+  'spawnAnimals',
+]);
+
+const POPULATION_MARKS = [10, 25, 50, 100, 200];
 
 /** How much food (berries, roots, shellfish) a biome offers, 0 … 1. */
 const BIOME_FOOD: Partial<Record<Biome, number>> = {
@@ -54,8 +121,23 @@ const BIOME_FOOD: Partial<Record<Biome, number>> = {
   [Biome.Mountains]: 0.12,
 };
 
+export type LifePhase = 'baby' | 'child' | 'youth' | 'adult' | 'elder';
+
+export function phaseOf(age: number): LifePhase {
+  return age < 3 ? 'baby' : age < 13 ? 'child' : age < 18 ? 'youth' : age < 55 ? 'adult' : 'elder';
+}
+
+/** Why a whisper or blessing cannot be used on someone (checked before it is used). */
+export type PowerBlock = 'young' | 'alreadyLeader' | 'noEnemies' | 'noPartner' | 'pregnant' | 'samePerson';
+
+/** What a power did to the living (for messages; replays ignore it). */
+export interface EventOutcome {
+  person?: number;
+  result?: 'accepted' | 'resisted' | 'noPlace';
+}
+
 /** Mulberry32 with its state in the open, so it can be saved. */
-class StateRng {
+class StateRng implements RandomSource {
   constructor(public state: number) {}
   next(): number {
     this.state = (this.state + 0x6d2b79f5) >>> 0;
@@ -75,17 +157,30 @@ class StateRng {
   }
 }
 
-type RandomSource = { next(): number; range(a: number, b: number): number; int(a: number, b: number): number; chance(p: number): boolean };
+type Someone = Person | ArchivedPerson;
+
+function isLiving(x: Someone | undefined): x is Person {
+  return !!x && 'alive' in x;
+}
+
+const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
 
 export class Life {
   private data: LifeData;
   private readonly rng: StateRng;
   private readonly food = new Map<number, FoodEntry>();
+  /** Everyone, living, recently dead and archived. */
+  private readonly byId = new Map<number, Someone>();
+  private readonly bandById = new Map<number, Band>();
+  private bandsChecked = false;
 
   private constructor(data: LifeData) {
     this.data = data;
     this.rng = new StateRng(data.rng);
     for (const [cell, level, at] of data.food) this.food.set(cell, { level, at });
+    for (const a of data.archive) this.byId.set(a.id, a);
+    for (const p of data.people) this.byId.set(p.id, p);
+    for (const b of data.bands) this.bandById.set(b.id, b);
   }
 
   // ------------------------------------------------------------ creation, saving
@@ -93,23 +188,101 @@ export class Life {
   /** A new living world: six people near fresh water and herds all over the land. */
   static create(world: World, t: number): Life {
     const start = Math.floor(t / TICK) * TICK;
-    const life = new Life({ t: start, rng: world.planet.seed ^ 0x5eed1e5, nextId: 1, people: [], herds: [], food: [] });
+    const life = new Life({
+      version: 4,
+      t: start,
+      rng: world.planet.seed ^ 0x5eed1e5,
+      nextId: 1,
+      people: [],
+      herds: [],
+      food: [],
+      bands: [],
+      archive: [],
+      chronicle: [],
+      popRecord: 0,
+    });
     const rng = new Rng(world.planet.seed).fork('first-people');
     const home = Life.findHome(world);
-    for (let i = 0; i < 6; i++) life.addPerson(world, home, rng, i % 2 === 0 ? 'f' : 'm');
+    const band = life.newBand(-1);
+    const founders: Person[] = [];
+    for (let i = 0; i < 6; i++) {
+      const p = life.addPerson(world, home, rng, { sex: i % 2 === 0 ? 'f' : 'm', age: [18, 30], band: band.id });
+      if (p) founders.push(p);
+    }
+    // They already know each other a little.
+    for (const p of founders) for (const q of founders) if (p !== q) life.addOp(p, q.id, Math.round(rng.range(8, 30)));
+    life.electLeader(band, false);
+    life.chron('founders', { n: founders.length, a: band.leader, major: 1 });
     life.spawnInitialHerds(world);
     return life;
   }
 
-  static restore(data: LifeData): Life {
-    return new Life(JSON.parse(JSON.stringify(data)) as LifeData);
+  /**
+   * A living world from saved data. Snapshots leave out the append-only lists
+   * (archive, chronicle); `ledgers` supplies them, usually from the current world.
+   */
+  static restore(data: LifeData | string, ledgers?: { archive: readonly ArchivedPerson[]; chronicle: readonly ChronicleEntry[] }): Life {
+    const raw = (typeof data === 'string' ? JSON.parse(data) : JSON.parse(JSON.stringify(data))) as LifeData;
+    const d = Life.upgrade(raw);
+    if (d.archiveCount !== undefined) {
+      d.archive = (ledgers?.archive ?? d.archive).slice(0, d.archiveCount);
+      delete d.archiveCount;
+    }
+    if (d.chronicleCount !== undefined) {
+      d.chronicle = (ledgers?.chronicle ?? d.chronicle).slice(0, d.chronicleCount);
+      delete d.chronicleCount;
+    }
+    return new Life(d);
   }
 
-  /** A deep copy of the full state. */
+  /** Brings data from older versions (milestone 3) up to date, the same way every time. */
+  private static upgrade(d: LifeData): LifeData {
+    if ((d.version ?? 3) >= 4) return d;
+    d.version = 4;
+    d.archive = Array.isArray(d.archive) ? d.archive : [];
+    d.chronicle = Array.isArray(d.chronicle) ? d.chronicle : [];
+    d.popRecord = 0;
+    for (const p of d.people) {
+      const old = p as Partial<Person> & Person;
+      if (!Array.isArray(old.traits)) old.traits = TRAITS.map((_, i) => Math.round(20 + 60 * hashUnit(p.id, i)));
+      if (!Array.isArray(old.look.genes)) {
+        const h = old.look.hair >= 6 ? 2 : old.look.hair;
+        old.look.genes = [h, h];
+        old.look.hair = h;
+      }
+      old.mother = old.mother ?? -1;
+      old.father = old.father ?? -1;
+      old.partner = old.partner ?? -1;
+      old.partners = old.partners ?? [];
+      old.rels = old.rels ?? [];
+      old.moods = old.moods ?? [];
+      old.social = old.social ?? 0.2;
+      old.band = -1;
+    }
+    // Groups are formed on the first step, when the planet is at hand (see ensureBands).
+    d.bands = [];
+    return d;
+  }
+
+  /** A deep copy of the full state (for saving). */
   serialize(): LifeData {
+    this.sync();
+    return JSON.parse(JSON.stringify(this.data)) as LifeData;
+  }
+
+  /** The state without the append-only lists, as compact text (for rewinding). */
+  snapshotJson(): string {
+    this.sync();
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(this.data)) out[k] = k === 'archive' || k === 'chronicle' ? [] : v;
+    out.archiveCount = this.data.archive.length;
+    out.chronicleCount = this.data.chronicle.length;
+    return JSON.stringify(out);
+  }
+
+  private sync(): void {
     this.data.rng = this.rng.state;
     this.data.food = [...this.food.entries()].map(([cell, e]) => [cell, e.level, e.at]);
-    return JSON.parse(JSON.stringify(this.data)) as LifeData;
   }
 
   get t(): number {
@@ -124,18 +297,77 @@ export class Life {
     return this.data.herds;
   }
 
+  get bands(): readonly Band[] {
+    return this.data.bands;
+  }
+
+  get archive(): readonly ArchivedPerson[] {
+    return this.data.archive;
+  }
+
+  get chronicle(): readonly ChronicleEntry[] {
+    return this.data.chronicle;
+  }
+
+  /** A living or recently dead person. */
   person(id: number): Person | undefined {
-    return this.data.people.find((p) => p.id === id);
+    const x = this.byId.get(id);
+    return isLiving(x) ? x : undefined;
+  }
+
+  /** Anyone who ever lived (living, recently dead or archived). */
+  anyone(id: number): Someone | undefined {
+    return this.byId.get(id);
   }
 
   herd(id: number): Herd | undefined {
     return this.data.herds.find((h) => h.id === id);
   }
 
+  band(id: number): Band | undefined {
+    return this.bandById.get(id);
+  }
+
   population(): number {
     let n = 0;
     for (const p of this.data.people) if (p.alive) n++;
     return n;
+  }
+
+  ageOf(p: { born: number; died?: number }, t = this.data.t): number {
+    return Math.max(0, ((p.died ?? t) - p.born) / YEAR);
+  }
+
+  /** Mood 0 … 100 and the reasons for it. */
+  mood(p: Person): { value: number; reasons: MoodReason[] } {
+    const partner = p.partner >= 0 ? this.person(p.partner) : undefined;
+    let children = 0;
+    for (const q of this.data.people) if (q.alive && (q.mother === p.id || q.father === p.id)) children++;
+    const reasons = moodReasons(p, this.data.t, { partnerAlive: !!partner?.alive, childrenAlive: children });
+    return { value: moodValue(reasons), reasons };
+  }
+
+  opinion(p: Person, id: number): number {
+    for (const r of p.rels) if (r[0] === id) return r[1];
+    return 0;
+  }
+
+  isLeader(p: Person): boolean {
+    return this.bandById.get(p.band)?.leader === p.id;
+  }
+
+  bandSize(bandId: number): number {
+    let n = 0;
+    for (const p of this.data.people) if (p.alive && p.band === bandId) n++;
+    return n;
+  }
+
+  /** Everyone whose mother or father this is, in order of birth. */
+  childrenOf(id: number): Someone[] {
+    const out: Someone[] = [];
+    for (const a of this.data.archive) if (a.mother === id || a.father === id) out.push(a);
+    for (const p of this.data.people) if (p.mother === id || p.father === id) out.push(p);
+    return out.sort((a, b) => a.born - b.born || a.id - b.id);
   }
 
   /** A green place close to fresh water, as a home for the first people. */
@@ -173,42 +405,74 @@ export class Life {
     return n;
   }
 
+  /** People without a group (data from older versions) join the nearest group or start one. */
+  private ensureBands(world: World): void {
+    if (this.bandsChecked) return;
+    this.bandsChecked = true;
+    const lost = this.data.people.filter((p) => p.alive && !this.bandById.has(p.band)).sort((a, b) => a.id - b.id);
+    for (const p of lost) {
+      const near = this.nearestLeader(world, p.cell, world.kmPerCell * 6);
+      if (near !== undefined) p.band = this.person(near)!.band;
+      else p.band = this.newBand(p.id).id;
+    }
+  }
+
   private step(world: World): void {
+    this.ensureBands(world);
     const t = this.data.t;
-    for (const p of this.data.people) if (p.alive) this.updatePerson(p, world, t);
+    const tick = Math.round(t / TICK);
+    const people = this.data.people;
+    const count = people.length; // babies born this step start next step
+    for (let i = 0; i < count; i++) if (people[i].alive) this.updatePerson(people[i], world, t, tick);
+
+    // Who is where (awake people).
+    const byCell = new Map<number, Person[]>();
+    for (const p of people) {
+      if (!p.alive) continue;
+      let list = byCell.get(p.cell);
+      if (!list) byCell.set(p.cell, (list = []));
+      list.push(p);
+    }
     // Sickness spreads among people in the same place.
-    for (const p of this.data.people) {
+    for (const p of people) {
       if (!p.alive || p.sick <= 0) continue;
-      for (const q of this.data.people) {
-        if (q === p || !q.alive || q.sick > 0 || q.immune || q.cell !== p.cell) continue;
+      for (const q of byCell.get(p.cell) ?? []) {
+        if (q === p || !q.alive || q.sick > 0 || q.immune) continue;
         if (this.rng.chance(0.006)) this.makeSick(q);
       }
     }
-    const tick = Math.round(t / TICK);
+    this.socialize(world, t, byCell);
+
     if (tick % HERD_EVERY === 0) {
       for (const h of this.data.herds) if (h.count > 0) this.updateHerd(h, world, t);
       this.data.herds = this.data.herds.filter((h) => h.count > 0);
     }
+    if (tick % TICKS_PER_DAY === 0) this.dailyWorld(world, t);
     if (tick % 360 === 0) this.cleanFood(world, t);
   }
 
-  // ------------------------------------------------------------ people
+  // ------------------------------------------------------------ people: basics
 
-  private addPerson(world: World, cell: number, rng: RandomSource, sex?: Sex): Person | null {
+  private addPerson(world: World, cell: number, rng: RandomSource, opts: { sex?: Sex; age?: [number, number]; band: number }): Person | null {
     if (this.population() >= MAX_PEOPLE) return null;
-    const s: Sex = sex ?? (rng.chance(0.5) ? 'f' : 'm');
+    const s: Sex = opts.sex ?? (rng.chance(0.5) ? 'f' : 'm');
     const nameRng = new Rng(Math.floor(rng.next() * 0xffffffff));
+    const [a0, a1] = opts.age ?? [16, 38];
     const p: Person = {
       id: this.data.nextId++,
       name: personName(nameRng, s),
       sex: s,
-      born: this.data.t - rng.range(16, 38) * YEAR,
-      look: {
-        skin: rng.next(),
-        hair: Math.floor(rng.next() * HAIR_COLORS.length),
-        height: rng.range(0.9, 1.1) * (s === 'm' ? 1.04 : 0.97),
-        clothes: Math.floor(rng.next() * CLOTH_COLORS.length),
-      },
+      born: this.data.t - rng.range(a0, a1) * YEAR,
+      look: founderLook(rng, s === 'm'),
+      traits: randomTraits(rng),
+      mother: -1,
+      father: -1,
+      partner: -1,
+      partners: [],
+      band: opts.band,
+      rels: [],
+      moods: [],
+      social: 0.1,
       cell: Life.nearestLand(world, cell),
       next: -1,
       progress: 0,
@@ -229,16 +493,50 @@ export class Life {
     };
     this.log(p, 'created');
     this.data.people.push(p);
+    this.byId.set(p.id, p);
     return p;
   }
 
-  private log(p: Person, key: LogKey, cause?: DeathCause): void {
-    p.log.push(cause ? { t: this.data.t, key, cause } : { t: this.data.t, key });
-    if (p.log.length > MAX_LOG) p.log.splice(1, p.log.length - MAX_LOG);
+  private newBand(leader: number): Band {
+    const band: Band = { id: this.data.nextId++, leader, founded: this.data.t };
+    this.data.bands.push(band);
+    this.bandById.set(band.id, band);
+    return band;
+  }
+
+  private log(p: Person, key: LogKey, extra?: { cause?: DeathCause; other?: number; n?: number }): void {
+    const entry: LogEntry = { t: this.data.t, key };
+    if (extra?.cause) entry.cause = extra.cause;
+    if (extra?.other !== undefined && extra.other >= 0) entry.other = extra.other;
+    if (extra?.n !== undefined) entry.n = extra.n;
+    p.log.push(entry);
+    if (p.log.length > MAX_LOG) {
+      // Forget small things first, keep the first line (birth).
+      let drop = p.log.findIndex((l, i) => i > 0 && !MAJOR_LOG.has(l.key));
+      if (drop < 0) drop = 1;
+      p.log.splice(drop, 1);
+    }
+  }
+
+  private chron(key: ChronicleKey, fields: Omit<ChronicleEntry, 't' | 'key'> = {}): void {
+    this.data.chronicle.push({ t: this.data.t, key, ...fields });
+  }
+
+  private addMood(p: Person, key: MoodKey, v: number, days: number, other?: number): void {
+    const m = { key, v, until: this.data.t + days * DAY } as Person['moods'][number];
+    if (other !== undefined) m.other = other;
+    p.moods.push(m);
+    if (p.moods.length > 10) {
+      p.moods.sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+      p.moods.length = 10;
+    }
   }
 
   private die(p: Person, cause: DeathCause): void {
     if (!p.alive) return;
+    const age = this.ageOf(p);
+    const wasLeader = this.isLeader(p);
+    const partner = p.partner;
     p.alive = false;
     p.died = this.data.t;
     p.cause = cause;
@@ -246,11 +544,45 @@ export class Life {
     p.path = [];
     p.action = 'idle';
     p.goal = 'none';
-    this.log(p, 'died', cause);
+    p.pregnant = undefined;
+    p.chat = undefined;
+    p.dest = undefined;
+    this.log(p, 'died', { cause });
+    this.chron('death', { a: p.id, n: Math.floor(age), s: cause, ...(wasLeader ? { major: 1 as const } : {}) });
+    p.partner = -1;
+    if (partner >= 0) {
+      const q = this.person(partner);
+      if (q && q.partner === p.id) q.partner = -1;
+    }
+    this.mourn(p, partner);
+    if (wasLeader) {
+      const band = this.bandById.get(p.band);
+      if (band) this.electLeader(band, true);
+    }
+    if (this.population() === 0) this.chron('extinct', { major: 1 });
+  }
+
+  /** Family and friends grieve. */
+  private mourn(dead: Person, partner: number): void {
+    for (const q of this.data.people) {
+      if (!q.alive || q === dead || this.ageOf(q) < 3) continue;
+      let v = 0;
+      let days = 0;
+      let logged = true;
+      if (q.id === partner) [v, days] = [-35, 30];
+      else if (dead.mother === q.id || dead.father === q.id) [v, days] = [-35, 30];
+      else if (q.mother === dead.id || q.father === dead.id) [v, days] = [-28, 20];
+      else if (this.siblings(q, dead)) [v, days] = [-18, 14];
+      else if (this.opinion(q, dead.id) >= 40) [v, days, logged] = [-10, 8, false];
+      if (v === 0) continue;
+      this.addMood(q, 'grief', v, days, dead.id);
+      if (logged) this.log(q, 'grief', { other: dead.id });
+    }
   }
 
   private makeSick(p: Person): void {
     if (p.sick > 0 || p.immune || !p.alive) return;
+    if (p.luck !== undefined && p.luck > this.data.t) return;
     p.sick = this.rng.range(4, 9) * DAY;
     this.log(p, 'sick');
   }
@@ -271,12 +603,31 @@ export class Life {
     return currentTemperature(world.planet, cell, season, this.localHours(world, cell, t)) + world.globalTemperature(t);
   }
 
+  /** Fresh water in this place or right next to it (or rain). */
   private hasWater(world: World, cell: number, raining: boolean): boolean {
-    return world.planet.fresh[cell] !== FRESH_NONE || raining;
+    return raining || this.waterScore(world, cell) > 0;
   }
 
-  private updatePerson(p: Person, world: World, t: number): void {
+  /** True if most of the group is close by (a leader waits for stragglers). */
+  private groupTogether(p: Person, world: World): boolean {
+    let all = 0;
+    let near = 0;
+    for (const q of this.data.people) {
+      if (!q.alive || q === p || q.band !== p.band) continue;
+      all++;
+      if (world.kmBetween(q.cell, p.cell) <= world.kmPerCell * 2.5) near++;
+    }
+    return all === 0 || near >= all * 0.6;
+  }
+
+  // ------------------------------------------------------------ people: each step
+
+  private updatePerson(p: Person, world: World, t: number, tick: number): void {
     const dt = TICK / DAY;
+    if (p.chat && t >= p.chat.until) p.chat = undefined;
+    if (p.feel && t >= p.feel.until) p.feel = undefined;
+    if (p.awe !== undefined && t >= p.awe) p.awe = undefined;
+    if (p.luck !== undefined && t >= p.luck) p.luck = undefined;
     if (p.action === 'carried') {
       if (t < p.actionUntil) return;
       p.action = 'idle';
@@ -289,6 +640,8 @@ export class Life {
       this.hurt(p, 0.2, 'flood');
     }
     const st = world.cellState(p.cell, t);
+    const age = this.ageOf(p, t);
+    const lucky = p.luck !== undefined;
 
     // Deadly places.
     if (st.lavaHeat > 0.05) return this.die(p, 'lava');
@@ -300,35 +653,47 @@ export class Life {
       if (!(p.flags & 8)) {
         p.flags |= 8;
         this.log(p, 'fledFire');
+        this.addMood(p, 'fled', -10, 4);
       }
     }
     if (st.water > 0.2) {
       danger = true;
-      if (st.water > 0.55 && this.rng.chance(0.2)) return this.die(p, 'flood');
+      if (st.water > 0.55 && this.rng.chance(lucky ? 0.05 : 0.2)) return this.die(p, 'flood');
       this.hurt(p, 0.08, 'flood');
       if (!(p.flags & 16)) {
         p.flags |= 16;
         this.log(p, 'fledFlood');
+        this.addMood(p, 'fled', -10, 4);
       }
     }
     if (st.storm > 0.6) this.hurt(p, 0.02 * st.storm, 'storm');
     if (!danger) p.flags &= ~(8 | 16);
 
     // Needs.
-    p.hunger = Math.min(1, p.hunger + 0.42 * dt);
-    p.thirst = Math.min(1, p.thirst + (st.raining ? 0 : 0.55 * dt));
+    const appetite = age < 13 ? 0.75 : 1;
+    p.hunger = Math.min(1, p.hunger + 0.42 * dt * appetite);
+    p.thirst = Math.min(1, p.thirst + (st.raining ? 0 : 0.55 * dt * appetite));
     if (st.raining) p.thirst = Math.max(0, p.thirst - 0.04);
     p.energy = Math.max(0, Math.min(1, p.energy + (p.action === 'sleep' ? 2.4 : -0.85) * dt));
+    if (age >= 3) p.social = Math.min(1, p.social + 0.2 * dt);
+    if (age < 3) {
+      // Babies are fed by whoever looks after them.
+      const carer = this.caretaker(p);
+      if (carer && (carer.cell === p.cell || carer.next === p.cell)) {
+        p.hunger = Math.max(0, p.hunger - 0.03);
+        p.thirst = Math.max(0, p.thirst - 0.04);
+      }
+    }
 
     if (p.hunger >= 1) {
-      this.hurt(p, 0.28 * dt, 'hunger');
+      this.hurt(p, 0.16 * dt, 'hunger');
       if (!(p.flags & FLAG_STARVING)) {
         p.flags |= FLAG_STARVING;
         this.log(p, 'starving');
       }
     } else if (p.hunger < 0.5) p.flags &= ~FLAG_STARVING;
     if (p.thirst >= 1) {
-      this.hurt(p, 0.42 * dt, 'thirst');
+      this.hurt(p, 0.3 * dt, 'thirst');
       if (!(p.flags & FLAG_PARCHED)) {
         p.flags |= FLAG_PARCHED;
         this.log(p, 'parched');
@@ -354,19 +719,24 @@ export class Life {
         this.log(p, 'recovered');
       }
     } else if (p.hunger < 0.6 && p.thirst < 0.6 && !danger) {
-      p.health = Math.min(1, p.health + 0.2 * dt);
+      p.health = Math.min(1, p.health + 0.2 * dt * (lucky ? 2 : 1) * (age > 60 ? 0.6 : 1));
     }
     if (p.health <= 0) return this.die(p, p.hurtBy ?? 'hunger');
+
+    if (p.pregnant && t >= p.pregnant.due) {
+      this.giveBirth(p, world, t);
+      if (!p.alive) return;
+    }
 
     // Doing things.
     if (danger && p.goal !== 'safety') {
       this.flee(p, world, t);
     } else if (p.action === 'walk') {
-      const urgent = (p.thirst > 0.7 && p.goal !== 'water') || (p.hunger > 0.75 && p.goal !== 'food' && p.goal !== 'water');
+      const urgent = age >= 3 && ((p.thirst > 0.7 && p.goal !== 'water') || (p.hunger > 0.75 && p.goal !== 'food' && p.goal !== 'water'));
       if (urgent) this.decide(p, world, t);
-      else this.walk(p, world, t);
+      else this.walk(p, world, t, age);
     } else if (p.action === 'gather') {
-      const bite = this.eat(world, p.cell, t, 0.012);
+      const bite = this.eat(world, p.cell, t, 0.012) * (lucky ? 1.5 : 1);
       p.hunger = Math.max(0, p.hunger - bite * 9);
       if (bite < 0.004 || p.hunger <= 0.02 || t >= p.actionUntil) this.decide(p, world, t);
     } else if (p.action === 'drink') {
@@ -374,10 +744,12 @@ export class Life {
       if (p.thirst <= 0 || t >= p.actionUntil) this.decide(p, world, t);
     } else if (p.action === 'sleep') {
       if (t >= p.actionUntil || (p.energy >= 1 && this.isDay(world, p.cell, t))) this.decide(p, world, t);
-      else if (p.thirst > 0.85 || p.hunger > 0.9) this.decide(p, world, t);
+      else if (age >= 3 && (p.thirst > 0.85 || p.hunger > 0.9)) this.decide(p, world, t);
     } else if (t >= p.actionUntil) {
       this.decide(p, world, t);
     }
+
+    if ((tick + p.id) % TICKS_PER_DAY === 0) this.personDaily(p, world, t);
   }
 
   private isDay(world: World, cell: number, t: number): boolean {
@@ -393,74 +765,108 @@ export class Life {
     p.next = -1;
     p.path = [];
     p.progress = 0;
+    const age = this.ageOf(p, t);
+    if (age < 3) return this.decideBaby(p, world, t);
 
+    // Needs come first; the group's place is the first choice, as the leader chose it well.
+    const leader = this.leaderOf(p);
+    const groupCell = leader && world.kmBetween(leader.cell, p.cell) <= world.kmPerCell * 8 ? leader.cell : -1;
     if (p.thirst > 0.5) {
       if (this.hasWater(world, p.cell, st.raining)) return this.start(p, 'drink', t, 60);
+      if (groupCell >= 0 && this.waterScore(world, groupCell) > 0 && this.goTo(p, world, (c) => c === groupCell, 12, 'water')) return;
       if (this.goTo(p, world, (c) => planet.fresh[c] !== FRESH_NONE, 18, 'water')) return;
     }
     if (p.hunger > 0.45) {
-      if (this.foodAt(world, p.cell, t) > 0.2) return this.start(p, 'gather', t, 180, true);
+      const here = this.foodAt(world, p.cell, t);
+      if (here > 0.2) return this.start(p, 'gather', t, 180, true);
+      if (groupCell >= 0 && groupCell !== p.cell && this.foodAt(world, groupCell, t) > 0.35 && this.goTo(p, world, (c) => c === groupCell, 12, 'food')) return;
       if (this.goTo(p, world, (c) => this.foodAt(world, c, t) > 0.35, 12, 'food')) return;
+      // Hard times: anything edible, farther away, or whatever is left here.
+      if (p.hunger > 0.65 && this.goTo(p, world, (c) => this.foodAt(world, c, t) > 0.15, 22, 'food')) return;
+      if (here > 0.03) return this.start(p, 'gather', t, 120, true);
     }
     const hours = this.localHours(world, p.cell, t);
     const night = hours < 5.5 || hours >= 21;
-    if ((night && p.energy < 0.85) || p.energy < 0.15) {
+    if ((night && p.energy < 0.85) || p.energy < 0.15 || (age < 6 && p.energy < 0.4)) {
       const wake = ((6.5 - hours + 24) % 24) * 60;
       return this.start(p, 'sleep', t, night ? Math.max(60, wake) : 240);
     }
-    // Stay with the group: follow the nearest older person if far away.
-    const leader = this.leaderOf(p, world);
-    if (leader && leader.cell !== p.cell && world.kmBetween(leader.cell, p.cell) > world.kmPerCell * 1.5) {
-      if (this.goTo(p, world, (c) => c === leader.cell, 25, 'group')) return;
+    // On the way to a faraway new home (waiting for the others now and then).
+    if (p.dest !== undefined) {
+      if (world.kmBetween(p.cell, p.dest) <= world.kmPerCell * 1.2) p.dest = undefined;
+      else if (!this.groupTogether(p, world)) return this.start(p, 'rest', t, 120, true);
+      else if (this.goTo(p, world, (c) => c === p.dest, 40, 'wander')) return;
+      else p.dest = undefined;
     }
-    // Leaders sometimes move on to a better place.
-    if (!leader && this.rng.chance(0.25)) {
-      const target = this.betterPlace(p, world, t);
-      if (target >= 0 && this.goTo(p, world, (c) => c === target, 6, 'wander')) return;
+    // Children stay near their parents, everyone else near the group's leader.
+    const guide = age < 13 ? (this.caretaker(p) ?? leader) : leader;
+    const reach = age < 13 || p.feel?.kind === 'fear' ? 0.6 : 1.5;
+    if (guide && guide !== p && guide.cell !== p.cell && world.kmBetween(guide.cell, p.cell) > world.kmPerCell * reach) {
+      if (this.goTo(p, world, (c) => c === guide.cell, 25, age < 13 ? 'family' : 'group')) return;
+    }
+    // Leaders sometimes move on to a better place (always, when food runs short).
+    const short = p.hunger > 0.5 || this.foodAt(world, p.cell, t) < 0.15;
+    if (!leader && age >= 13 && (short || this.rng.chance(0.25)) && this.groupTogether(p, world)) {
+      const target = this.betterPlace(p, world, t, p.feel?.kind === 'courage' || short ? 7 : 4);
+      if (target >= 0 && this.goTo(p, world, (c) => c === target, 8, 'wander')) return;
     }
     this.start(p, 'rest', t, this.rng.range(60, 200), true);
   }
 
+  /** Babies stay with whoever looks after them and sleep when they do. */
+  private decideBaby(p: Person, world: World, t: number): void {
+    const carer = this.caretaker(p);
+    if (!carer) return this.start(p, 'rest', t, 60);
+    if (carer.cell !== p.cell && this.goTo(p, world, (c) => c === carer.cell, 30, 'family')) return;
+    p.spot = [carer.spot[0] + 2.5, carer.spot[1] + 1.5];
+    if (carer.action === 'sleep') return this.start(p, 'sleep', t, Math.max(60, carer.actionUntil - t));
+    this.start(p, 'rest', t, 60);
+  }
+
   private start(p: Person, action: Person['action'], t: number, minutes: number, newSpot = false): void {
     p.action = action;
-    p.actionUntil = t + Math.round(minutes / TICK) * TICK;
+    p.actionUntil = t + Math.max(1, Math.round(minutes / TICK)) * TICK;
     if (newSpot) p.spot = [this.rng.range(-14, 14), this.rng.range(-14, 14)];
   }
 
-  /** The nearest person created earlier within six cells (the group's elder), if any. */
-  private leaderOf(p: Person, world: World): Person | null {
-    let best: Person | null = null;
-    let bestKm = world.kmPerCell * 6;
-    for (const q of this.data.people) {
-      if (!q.alive || q.id >= p.id) continue;
-      const km = world.kmBetween(q.cell, p.cell);
-      if (km < bestKm) {
-        bestKm = km;
-        best = q;
-      }
+  /** The group's leader, or null if this person leads (or the leader is gone). */
+  private leaderOf(p: Person): Person | null {
+    const band = this.bandById.get(p.band);
+    if (!band || band.leader === p.id || band.leader < 0) return null;
+    const l = this.person(band.leader);
+    return l && l.alive ? l : null;
+  }
+
+  /** Who looks after a child: a parent, or another adult of the group. */
+  private caretaker(p: Person): Person | null {
+    for (const id of [p.mother, p.father]) {
+      const q = id >= 0 ? this.person(id) : undefined;
+      if (q?.alive && q.band === p.band && this.ageOf(q) >= 13) return q;
     }
-    return best;
+    const leader = this.leaderOf(p);
+    if (leader && this.ageOf(leader) >= 13) return leader;
+    for (const q of this.data.people) if (q.alive && q !== p && q.band === p.band && this.ageOf(q) >= 16) return q;
+    return null;
   }
 
   /** The best place within a few days' walk: food, fresh water and safety. −1 if here is best. */
-  private betterPlace(p: Person, world: World, t: number): number {
+  private betterPlace(p: Person, world: World, t: number, rings: number): number {
     const planet = world.planet;
     const score = (c: number, steps: number) => {
       const st = world.cellState(c, t);
       if (st.burning || st.water > 0.1 || st.lavaHeat > 0) return -1;
-      let water = planet.fresh[c] !== FRESH_NONE ? 0.6 : 0;
-      for (let k = planet.neighborOffsets[c]; k < planet.neighborOffsets[c + 1] && water === 0; k++) {
-        if (planet.fresh[planet.neighbors[k]] !== FRESH_NONE) water = 0.3;
-      }
+      const water = this.waterScore(world, c);
       if (water === 0) return -1; // never lead the group away from water
-      return this.foodAt(world, c, t) * 1.5 + water - steps * 0.06 + this.rng.next() * 0.15;
+      // Avoid places with hard winters.
+      const cold = Math.max(0, 8 - (planet.temperature[c] + world.globalTemperature(t) - planet.seasonAmplitude[c] * 0.5)) / 12;
+      return this.foodAt(world, c, t) * 1.5 + water - cold - steps * 0.06 + this.rng.next() * 0.15;
     };
     const here = Math.max(0, score(p.cell, 0));
     let best = -1;
     let bestScore = here + 0.25;
     const seen = new Set([p.cell]);
     let frontier = [p.cell];
-    for (let step = 1; step <= 4; step++) {
+    for (let step = 1; step <= rings; step++) {
       const next: number[] = [];
       for (const c of frontier) {
         for (let k = planet.neighborOffsets[c]; k < planet.neighborOffsets[c + 1]; k++) {
@@ -478,6 +884,15 @@ export class Life {
       frontier = next;
     }
     return best;
+  }
+
+  private waterScore(world: World, c: number): number {
+    const planet = world.planet;
+    if (planet.fresh[c] !== FRESH_NONE) return 0.6;
+    for (let k = planet.neighborOffsets[c]; k < planet.neighborOffsets[c + 1]; k++) {
+      if (planet.fresh[planet.neighbors[k]] !== FRESH_NONE) return 0.3;
+    }
+    return 0;
   }
 
   /** Breadth-first search over land to the nearest cell that matches. */
@@ -511,16 +926,22 @@ export class Life {
     return false;
   }
 
-  private walk(p: Person, world: World, t: number): void {
+  private walk(p: Person, world: World, t: number, age: number): void {
     if (p.next < 0) return this.arrive(p, world, t);
     const km = Math.max(1, world.kmBetween(p.cell, p.next));
-    const speed = WALK_KM_PER_TICK * (p.goal === 'safety' ? 1.7 : 1) * (p.sick > 0 ? 0.6 : 1) * (p.energy < 0.1 ? 0.6 : 1);
+    const pace = age >= 3 && age < 9 ? 0.85 : age > 60 ? 0.8 : 1;
+    const speed = WALK_KM_PER_TICK * pace * (p.goal === 'safety' ? 1.7 : 1) * (p.sick > 0 ? 0.6 : 1) * (p.energy < 0.1 ? 0.6 : 1) * (p.pregnant ? 0.85 : 1);
     p.progress += speed / km;
     if (p.progress >= 1) {
       p.cell = p.next;
       p.progress = 0;
       p.next = p.path.shift() ?? -1;
       if (p.next >= 0 && world.planet.heightM[p.next] < 0) p.next = -1;
+      // Water or food on the way: take it.
+      if (p.goal !== 'safety' && age >= 3) {
+        if (p.thirst > 0.6 && this.hasWater(world, p.cell, false)) return this.start(p, 'drink', t, 60, true);
+        if (p.hunger > 0.6 && this.foodAt(world, p.cell, t) > 0.25) return this.start(p, 'gather', t, 180, true);
+      }
       if (p.next < 0) this.arrive(p, world, t);
     }
   }
@@ -529,8 +950,8 @@ export class Life {
     const goal = p.goal;
     p.next = -1;
     p.path = [];
-    if (goal === 'water') return this.start(p, 'drink', t, 60, true);
-    if (goal === 'food') return this.start(p, 'gather', t, 180, true);
+    if (goal === 'water' && this.hasWater(world, p.cell, false)) return this.start(p, 'drink', t, 60, true);
+    if (goal === 'food' && this.foodAt(world, p.cell, t) > 0.05) return this.start(p, 'gather', t, 180, true);
     this.decide(p, world, t);
   }
 
@@ -556,6 +977,585 @@ export class Life {
     p.path = [];
     p.progress = 0;
     p.actionUntil = t + 6 * 60;
+  }
+
+  // ------------------------------------------------------------ people: each day
+
+  private personDaily(p: Person, world: World, t: number): void {
+    p.moods = p.moods.filter((m) => m.until > t);
+    this.fadeOpinions(p, Math.floor(t / DAY));
+    const age = this.ageOf(p, t);
+
+    // Growing old, and the dangers of the first years.
+    const yearly = age < 1 ? 0.03 : age < 5 ? 0.008 : age < 40 ? 0.002 : age < 50 ? 0.012 : age < 60 ? 0.04 : age < 70 ? 0.1 : age < 80 ? 0.22 : 0.4;
+    if (this.rng.chance((yearly / DAYS_PER_YEAR) * (p.luck !== undefined ? 0.5 : 1))) {
+      this.die(p, age < 55 ? 'sickness' : 'age');
+      return;
+    }
+    // Coming of age: children take on some of their parents' views of others.
+    if (age >= 13 && age - 1 / DAYS_PER_YEAR < 13) this.inheritOpinions(p);
+
+    if (p.sex === 'f' && !p.pregnant && p.partner >= 0) this.tryConceive(p, world, t, age);
+
+    // A couple that cannot stand each other any more breaks up.
+    if (p.partner >= 0) {
+      const q = this.person(p.partner);
+      if (q?.alive && this.opinion(p, q.id) < -25 && this.opinion(q, p.id) < 10) this.separate(p, q);
+    }
+  }
+
+  private fadeOpinions(p: Person, day: number): void {
+    for (let i = p.rels.length - 1; i >= 0; i--) {
+      const [id, v] = p.rels[i];
+      if (this.isFamily(p, id)) continue;
+      // Feelings fade slowly, strong ones even more slowly.
+      if (day % (Math.abs(v) >= 60 ? 10 : 3) !== 0) continue;
+      const nv = Math.trunc(v * 0.99);
+      if (nv === 0) p.rels.splice(i, 1);
+      else p.rels[i][1] = nv;
+    }
+  }
+
+  private inheritOpinions(child: Person): void {
+    for (const id of [child.mother, child.father]) {
+      const parent = id >= 0 ? this.person(id) : undefined;
+      if (!parent?.alive) continue;
+      for (const [other, v] of parent.rels) {
+        if (other === child.id || Math.abs(v) < 40 || this.isFamily(child, other)) continue;
+        this.addOp(child, other, Math.round(v * 0.3));
+      }
+    }
+  }
+
+  private tryConceive(p: Person, world: World, t: number, age: number): void {
+    const q = this.person(p.partner);
+    if (!q?.alive || age < ADULT_AGE || age > 44) return;
+    if (p.lastBirth !== undefined && t - p.lastBirth < 2 * YEAR) return;
+    if (world.kmBetween(p.cell, q.cell) > world.kmPerCell * 1.6) return;
+    const fertility = age < 20 ? 0.6 : age < 30 ? 1 : age < 35 ? 0.8 : age < 40 ? 0.5 : 0.2;
+    const fed = p.hunger < 0.6 && p.thirst < 0.6 ? 1 : 0.35;
+    const group = clamp(1.25 - this.bandSize(p.band) / 40, 0.15, 1);
+    const world$ = clamp(1.25 - this.population() / 240, 0.1, 1);
+    const mood = this.mood(p).value;
+    const spirit = mood > 65 ? 1.15 : mood < 30 ? 0.7 : 1;
+    const chance = 0.02 * fertility * fed * group * world$ * spirit * (p.luck !== undefined ? 1.5 : 1);
+    if (this.rng.chance(chance)) p.pregnant = { father: q.id, due: t + PREGNANCY };
+  }
+
+  private giveBirth(mother: Person, world: World, t: number): void {
+    const fatherId = mother.pregnant?.father ?? -1;
+    mother.pregnant = undefined;
+    mother.lastBirth = t;
+    const father = this.person(fatherId) ?? (this.anyone(fatherId) as ArchivedPerson | undefined);
+    const twins = this.rng.chance(0.015);
+    const babies: Person[] = [];
+    for (let i = 0; i < (twins ? 2 : 1); i++) {
+      const baby = this.makeBaby(mother, father, world, t);
+      if (baby) babies.push(baby);
+    }
+    if (babies.length === 0) return;
+    this.data.births = (this.data.births ?? 0) + babies.length;
+    const first = (this.data.births ?? 0) === babies.length;
+    if (babies.length === 2) {
+      this.chron('twins', { a: babies[0].id, b: babies[1].id, c: mother.id, ...(first ? { major: 1 as const } : {}) });
+    } else {
+      this.chron('birth', { a: babies[0].id, b: mother.id, c: fatherId, ...(first ? { major: 1 as const } : {}) });
+    }
+    for (const parent of [mother, isLiving(father) ? father : undefined]) {
+      if (!parent?.alive) continue;
+      if (babies.length === 2) this.log(parent, 'twins', { other: babies[0].id, n: babies[1].id });
+      else this.log(parent, 'childBorn', { other: babies[0].id });
+      this.addMood(parent, 'newborn', 20, 20, babies[0].id);
+    }
+    if (this.rng.chance(0.004)) this.die(mother, 'childbirth');
+  }
+
+  private makeBaby(mother: Person, father: Someone | undefined, world: World, t: number): Person | null {
+    if (this.population() >= MAX_PEOPLE) return null;
+    const sex: Sex = this.rng.chance(0.5) ? 'f' : 'm';
+    const dad = father ?? mother;
+    const baby: Person = {
+      id: this.data.nextId++,
+      name: personName(new Rng(Math.floor(this.rng.next() * 0xffffffff)), sex),
+      sex,
+      born: t,
+      look: childLook(this.rng, mother.look, dad.look, sex === 'm'),
+      traits: childTraits(this.rng, mother.traits, dad.traits),
+      mother: mother.id,
+      father: father ? father.id : -1,
+      partner: -1,
+      partners: [],
+      band: mother.band,
+      rels: [],
+      moods: [],
+      social: 0,
+      cell: mother.cell,
+      next: -1,
+      progress: 0,
+      path: [],
+      goal: 'none',
+      action: 'rest',
+      actionUntil: t + TICK,
+      hunger: 0.1,
+      thirst: 0.1,
+      energy: 1,
+      health: 1,
+      sick: 0,
+      immune: false,
+      spot: [mother.spot[0] + 2.5, mother.spot[1] + 1.5],
+      alive: true,
+      log: [],
+      flags: 0,
+    };
+    this.log(baby, 'born', { other: mother.id, n: father ? father.id : undefined });
+    this.data.people.push(baby);
+    this.byId.set(baby.id, baby);
+    // Family love from the first day.
+    this.setOp(mother, baby.id, 70);
+    this.setOp(baby, mother.id, 60);
+    if (isLiving(father) && father.alive) {
+      this.setOp(father, baby.id, 60);
+      this.setOp(baby, father.id, 50);
+    }
+    for (const q of this.data.people) {
+      if (q === baby || !q.alive || !this.siblings(q, baby)) continue;
+      this.addOp(q, baby.id, 30);
+      this.addOp(baby, q.id, 30);
+    }
+    void world;
+    return baby;
+  }
+
+  // ------------------------------------------------------------ people: together
+
+  private findRel(p: Person, id: number): [number, number] | undefined {
+    for (const r of p.rels) if (r[0] === id) return r;
+    return undefined;
+  }
+
+  private setOp(p: Person, id: number, v: number): void {
+    const r = this.findRel(p, id);
+    if (r) {
+      r[1] = clamp(Math.round(v), -100, 100);
+      return;
+    }
+    this.addOp(p, id, v);
+  }
+
+  private addOp(p: Person, id: number, dv: number): void {
+    if (id === p.id) return;
+    const r = this.findRel(p, id);
+    if (r) {
+      r[1] = clamp(Math.round(r[1] + dv), -100, 100);
+      return;
+    }
+    const v = clamp(Math.round(dv), -100, 100);
+    if (v === 0) return;
+    if (p.rels.length >= MAX_RELS) {
+      // Make room: forget the weakest feeling about someone outside the family.
+      let weakest = -1;
+      for (let i = 0; i < p.rels.length; i++) {
+        if (this.isFamily(p, p.rels[i][0])) continue;
+        if (weakest < 0 || Math.abs(p.rels[i][1]) < Math.abs(p.rels[weakest][1])) weakest = i;
+      }
+      if (weakest < 0 || Math.abs(p.rels[weakest][1]) > Math.abs(v)) return;
+      p.rels.splice(weakest, 1);
+    }
+    p.rels.push([id, v]);
+  }
+
+  private siblings(a: { id: number; mother: number; father: number }, b: { id: number; mother: number; father: number }): boolean {
+    if (a.id === b.id) return false;
+    return (a.mother >= 0 && a.mother === b.mother) || (a.father >= 0 && a.father === b.father);
+  }
+
+  /** Partner, parents, children, brothers and sisters. */
+  private isFamily(p: Person, id: number): boolean {
+    if (id === p.partner || id === p.mother || id === p.father) return true;
+    const o = this.byId.get(id);
+    if (!o) return false;
+    return o.mother === p.id || o.father === p.id || this.siblings(p, o);
+  }
+
+  /** Too closely related to become a couple: parents, children, siblings, grandparents, aunts and uncles. */
+  isCloseKin(a: Someone, b: Someone): boolean {
+    if (a.mother === b.id || a.father === b.id || b.mother === a.id || b.father === a.id) return true;
+    if (this.siblings(a, b)) return true;
+    const parents = (x: Someone) => [x.mother, x.father].filter((id) => id >= 0).map((id) => this.byId.get(id)).filter((y): y is Someone => !!y);
+    for (const pa of parents(a)) {
+      if (pa.mother === b.id || pa.father === b.id || this.siblings(pa, b)) return true;
+    }
+    for (const pb of parents(b)) {
+      if (pb.mother === a.id || pb.father === a.id || this.siblings(pb, a)) return true;
+    }
+    return false;
+  }
+
+  private canCourt(p: Person, q: Person, ignorePartner = false): boolean {
+    if (p.sex === q.sex || !p.alive || !q.alive) return false;
+    if (!ignorePartner && (p.partner >= 0 || q.partner >= 0)) return false;
+    const ap = this.ageOf(p);
+    const aq = this.ageOf(q);
+    if (ap < ADULT_AGE || aq < ADULT_AGE || Math.abs(ap - aq) > 18) return false;
+    return !this.isCloseKin(p, q);
+  }
+
+  private grieving(p: Person): boolean {
+    return p.moods.some((m) => m.key === 'grief' && m.v <= -15 && m.until > this.data.t);
+  }
+
+  private becomeCouple(a: Person, b: Person): void {
+    a.partner = b.id;
+    b.partner = a.id;
+    // From different groups: one moves to the other's group (a leader never leaves).
+    if (a.band !== b.band) {
+      const [stay, go] = this.isLeader(b) || (!this.isLeader(a) && this.bandSize(b.band) > this.bandSize(a.band)) ? [b, a] : [a, b];
+      if (!this.isLeader(go)) this.moveToBand(go, stay.band);
+    }
+    if (!a.partners.includes(b.id)) a.partners.push(b.id);
+    if (!b.partners.includes(a.id)) b.partners.push(a.id);
+    this.setOp(a, b.id, Math.max(70, this.opinion(a, b.id)));
+    this.setOp(b, a.id, Math.max(70, this.opinion(b, a.id)));
+    for (const [x, y] of [
+      [a, b],
+      [b, a],
+    ]) {
+      this.log(x, 'partner', { other: y.id });
+      this.addMood(x, 'partner', 20, 20, y.id);
+    }
+    const [f, m] = a.sex === 'f' ? [a, b] : [b, a];
+    this.chron('couple', { a: f.id, b: m.id });
+  }
+
+  /** Moves someone (and their young children) to another group. */
+  private moveToBand(p: Person, band: number): void {
+    const old = p.band;
+    for (const q of this.data.people) {
+      if (q.alive && q.band === old && (q === p || ((q.mother === p.id || q.father === p.id) && this.ageOf(q) < 13))) q.band = band;
+    }
+  }
+
+  private separate(a: Person, b: Person): void {
+    a.partner = -1;
+    b.partner = -1;
+    for (const [x, y] of [
+      [a, b],
+      [b, a],
+    ]) {
+      this.log(x, 'separated', { other: y.id });
+      this.addMood(x, 'separated', -15, 15, y.id);
+    }
+    this.chron('separated', { a: a.id, b: b.id });
+  }
+
+  /** People close to each other talk, play, flirt, quarrel and comfort each other. */
+  private socialize(world: World, t: number, byCell: Map<number, Person[]>): void {
+    const planet = world.planet;
+    const free = (q: Person) => q.alive && !q.chat && q.action !== 'sleep' && q.action !== 'carried' && q.goal !== 'safety' && this.ageOf(q, t) >= 3;
+    for (const p of this.data.people) {
+      if (!free(p)) continue;
+      if (!this.rng.chance(0.045 * (0.6 + p.social))) continue;
+      // Someone nearby, preferably family, a partner or a friend.
+      let total = 0;
+      const options: [Person, number][] = [];
+      const consider = (list: Person[] | undefined) => {
+        if (!list) return;
+        for (const q of list) {
+          if (q === p || !free(q)) continue;
+          const w = 1 + Math.max(0, this.opinion(p, q.id)) / 25 + (q.id === p.partner ? 4 : 0);
+          options.push([q, w]);
+          total += w;
+        }
+      };
+      consider(byCell.get(p.cell));
+      for (let k = planet.neighborOffsets[p.cell]; k < planet.neighborOffsets[p.cell + 1]; k++) consider(byCell.get(planet.neighbors[k]));
+      if (options.length === 0) continue;
+      let r = this.rng.next() * total;
+      let q = options[options.length - 1][0];
+      for (const [cand, w] of options) {
+        r -= w;
+        if (r < 0) {
+          q = cand;
+          break;
+        }
+      }
+      this.interact(p, q, t);
+    }
+  }
+
+  private interact(p: Person, q: Person, t: number): void {
+    const ap = this.ageOf(p, t);
+    const aq = this.ageOf(q, t);
+    const kindP = p.traits[T_KIND];
+    const opPQ = this.opinion(p, q.id);
+    const lucky = p.luck !== undefined;
+    let kind: ChatKind = 'talk';
+    if (ap < 13 && aq < 13) kind = 'play';
+    else if (this.grieving(q) && kindP > 45 && this.rng.chance(0.5)) kind = 'comfort';
+    else if (p.partner === q.id) kind = this.rng.chance(0.5) ? 'love' : 'talk';
+    else if (this.canCourt(p, q)) {
+      const compat = 20 - (TRAITS.reduce((s, _, i) => s + Math.abs(p.traits[i] - q.traits[i]), 0) / TRAITS.length) * 0.5;
+      const attraction = opPQ + 10 + compat + this.rng.range(-15, 15) + (lucky ? 10 : 0);
+      if (!this.grieving(p) && attraction > 5) kind = 'flirt';
+    }
+    if (kind !== 'play' && kind !== 'comfort') {
+      const mood = this.mood(p).value;
+      const quarrel =
+        0.03 +
+        p.traits[T_AGGRESSIVE] / 350 +
+        (mood < 35 ? 0.08 : 0) +
+        (opPQ < -20 ? 0.12 : 0) +
+        (opPQ < -50 ? 0.1 : 0) +
+        (p.feel?.kind === 'anger' ? 0.35 : 0) -
+        kindP / 600 -
+        (lucky ? 0.03 : 0);
+      if (this.rng.chance(quarrel)) kind = 'quarrel';
+    }
+    const until = t + 3 * TICK;
+    p.chat = { kind, with: q.id, until };
+    q.chat = { kind, with: p.id, until };
+    const warmth = 0.6 + kindP / 125;
+    switch (kind) {
+      case 'talk':
+        this.addOp(p, q.id, this.rng.range(1, 4) * warmth * (lucky ? 1.5 : 1));
+        this.addOp(q, p.id, this.rng.range(1, 4) * (0.6 + q.traits[T_KIND] / 125));
+        p.social = Math.max(0, p.social - 0.35);
+        q.social = Math.max(0, q.social - 0.35);
+        break;
+      case 'play':
+        this.addOp(p, q.id, 3);
+        this.addOp(q, p.id, 3);
+        p.social = Math.max(0, p.social - 0.4);
+        q.social = Math.max(0, q.social - 0.4);
+        break;
+      case 'love':
+        this.addOp(p, q.id, 2);
+        this.addOp(q, p.id, 2);
+        p.social = Math.max(0, p.social - 0.4);
+        q.social = Math.max(0, q.social - 0.4);
+        break;
+      case 'comfort':
+        for (const m of q.moods) if (m.key === 'grief') m.v = Math.round(m.v * 0.8);
+        this.addOp(q, p.id, 8);
+        this.addOp(p, q.id, 3);
+        q.social = Math.max(0, q.social - 0.4);
+        break;
+      case 'flirt': {
+        this.addOp(p, q.id, this.rng.range(4, 9) + (lucky ? 4 : 0));
+        const back = this.canCourt(q, p) ? this.rng.range(2, 7) * (this.opinion(q, p.id) > -10 ? 1 : 0.3) : 0;
+        this.addOp(q, p.id, back);
+        p.social = Math.max(0, p.social - 0.3);
+        if (this.opinion(p, q.id) >= 60 && this.opinion(q, p.id) >= 50 && this.canCourt(p, q)) this.becomeCouple(p, q);
+        break;
+      }
+      case 'quarrel': {
+        const loss = this.rng.range(4, 12);
+        this.addOp(p, q.id, -loss);
+        this.addOp(q, p.id, -loss * (1.2 - q.traits[T_KIND] / 200));
+        this.addMood(p, 'quarrel', -6, 2, q.id);
+        this.addMood(q, 'quarrel', -8, 2, p.id);
+        if (p.traits[T_AGGRESSIVE] > 65 && this.opinion(p, q.id) < -50 && this.rng.chance(0.08)) {
+          // A rare fight: someone gets hurt.
+          const loser = this.rng.chance(0.5) ? p : q;
+          this.hurt(loser, 0.12, 'fight');
+          this.log(p, 'fight', { other: q.id });
+          this.log(q, 'fight', { other: p.id });
+          this.addOp(q, p.id, -15);
+        }
+        break;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ groups
+
+  /** The adult best suited to lead: experienced, ambitious and brave (or called by you). */
+  private electLeader(band: Band, announce: boolean): void {
+    let best: Person | null = null;
+    let bestScore = -Infinity;
+    let oldest: Person | null = null;
+    for (const p of this.data.people) {
+      if (!p.alive || p.band !== band.id) continue;
+      if (!oldest || p.born < oldest.born) oldest = p;
+      const age = this.ageOf(p);
+      if (age < ADULT_AGE) continue;
+      const score =
+        Math.min(age, 50) -
+        Math.max(0, age - 60) * 1.5 +
+        p.traits[T_AMBITIOUS] * 0.3 +
+        p.traits[T_BRAVE] * 0.15 +
+        p.traits[T_CLEVER] * 0.1 +
+        (p.lead !== undefined && p.lead > this.data.t ? 200 : 0) +
+        hashUnit(p.id, 99) * 4;
+      if (score > bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    }
+    const chosen = best ?? oldest;
+    const id = chosen ? chosen.id : -1;
+    if (id === band.leader) return;
+    band.leader = id;
+    if (chosen && announce) {
+      this.log(chosen, 'leader');
+      this.chron('leader', { a: chosen.id });
+    }
+  }
+
+  private dailyWorld(world: World, t: number): void {
+    // The dead are archived after the time in which they could be revived.
+    if (this.data.people.some((p) => !p.alive && p.died !== undefined && t - p.died > REVIVE_WINDOW)) {
+      const keep: Person[] = [];
+      for (const p of this.data.people) {
+        if (!p.alive && p.died !== undefined && t - p.died > REVIVE_WINDOW) {
+          const a = this.toArchive(p);
+          this.data.archive.push(a);
+          this.byId.set(a.id, a);
+        } else keep.push(p);
+      }
+      this.data.people = keep;
+      // Feelings about the long dead fade from the living (family is remembered).
+      for (const p of keep) {
+        if (!p.alive) continue;
+        p.rels = p.rels.filter(([id]) => this.isFamily(p, id) || isLiving(this.byId.get(id)));
+      }
+    }
+    // Groups: drop empty ones, make sure each has a leader.
+    const members = new Map<number, Person[]>();
+    for (const p of this.data.people) {
+      if (!p.alive) continue;
+      let list = members.get(p.band);
+      if (!list) members.set(p.band, (list = []));
+      list.push(p);
+    }
+    this.data.bands = this.data.bands.filter((b) => {
+      if (members.has(b.id)) return true;
+      this.bandById.delete(b.id);
+      return false;
+    });
+    for (const band of this.data.bands) {
+      const leader = this.person(band.leader);
+      if (!leader?.alive || leader.band !== band.id) this.electLeader(band, true);
+      // Crowded groups split: a young family moves away to find a new home.
+      const list = members.get(band.id) ?? [];
+      if (list.length >= 26 && this.rng.chance(0.04)) {
+        let mover: Person | null = null;
+        let moverScore = -Infinity;
+        for (const p of list) {
+          const age = this.ageOf(p);
+          if (p.id === band.leader || p.partner < 0 || age < 17 || age > 40) continue;
+          const s = p.traits[T_BRAVE] + p.traits[T_CURIOUS] + this.rng.next() * 30;
+          if (s > moverScore) {
+            moverScore = s;
+            mover = p;
+          }
+        }
+        if (mover) this.emigrate(mover, world, t);
+      }
+    }
+    // Milestones of the population.
+    const pop = this.population();
+    for (const mark of POPULATION_MARKS) {
+      if (pop >= mark && this.data.popRecord < mark) {
+        this.data.popRecord = mark;
+        this.chron('population', { n: mark, major: 1 });
+      }
+    }
+  }
+
+  private toArchive(p: Person): ArchivedPerson {
+    return {
+      id: p.id,
+      name: p.name,
+      sex: p.sex,
+      born: p.born,
+      died: p.died ?? this.data.t,
+      cause: p.cause ?? 'age',
+      mother: p.mother,
+      father: p.father,
+      partners: [...p.partners],
+      look: { ...p.look, genes: [p.look.genes[0], p.look.genes[1]] },
+      traits: [...p.traits],
+      band: p.band,
+      cell: p.cell,
+      spot: [p.spot[0], p.spot[1]],
+      log: p.log.filter((l) => MAJOR_LOG.has(l.key)).slice(-14),
+    };
+  }
+
+  /**
+   * Someone leaves with their partner and young children to find a new home
+   * far away, and founds a new group. A leader takes the whole group along.
+   */
+  private emigrate(p: Person, world: World, t: number): boolean {
+    const dest = this.farPlace(p, world, t);
+    if (dest < 0) return false;
+    const band = this.bandById.get(p.band);
+    if (band && band.leader === p.id) {
+      p.dest = dest;
+      const n = this.bandSize(p.band) - 1;
+      this.log(p, 'emigrated', { n });
+      this.chron('moved', { a: p.id, n: n + 1, major: 1 });
+      return true;
+    }
+    const movers = [p];
+    const partner = p.partner >= 0 ? this.person(p.partner) : undefined;
+    if (partner?.alive && partner.band === p.band) movers.push(partner);
+    for (const q of this.data.people) {
+      if (!q.alive || q.band !== p.band || movers.includes(q) || this.ageOf(q) >= 13) continue;
+      if (q.mother === p.id || q.father === p.id || (partner && (q.mother === partner.id || q.father === partner.id))) movers.push(q);
+    }
+    const newBand = this.newBand(p.id);
+    for (const q of movers) {
+      q.band = newBand.id;
+      q.next = -1;
+      q.path = [];
+      q.action = 'idle';
+      q.actionUntil = t;
+    }
+    p.dest = dest;
+    this.log(p, 'emigrated', { n: movers.length - 1 });
+    if (partner && movers.includes(partner)) this.log(partner, 'emigrated', { n: movers.length - 1 });
+    this.chron('emigrate', { a: p.id, n: movers.length, major: 1 });
+    return true;
+  }
+
+  /** A good place 7–16 cells away, not too close to another group. */
+  private farPlace(p: Person, world: World, t: number): number {
+    const planet = world.planet;
+    const others: number[] = [];
+    for (const b of this.data.bands) {
+      if (b.id === p.band) continue;
+      const l = this.person(b.leader);
+      if (l?.alive) others.push(l.cell);
+    }
+    let best = -1;
+    let bestScore = -Infinity;
+    const seen = new Set([p.cell]);
+    let frontier = [p.cell];
+    for (let step = 1; step <= 16; step++) {
+      const next: number[] = [];
+      for (const c of frontier) {
+        for (let k = planet.neighborOffsets[c]; k < planet.neighborOffsets[c + 1]; k++) {
+          const n = planet.neighbors[k];
+          if (seen.has(n) || planet.heightM[n] < 0) continue;
+          seen.add(n);
+          next.push(n);
+          if (step < 7) continue;
+          const water = this.waterScore(world, n);
+          const food = this.capacity(world, n, t);
+          if (water === 0 || food < 0.3) continue;
+          if (others.some((o) => world.kmBetween(o, n) < world.kmPerCell * 5)) continue;
+          const s = food * 1.5 + water + this.rng.next() * 0.3;
+          if (s > bestScore) {
+            bestScore = s;
+            best = n;
+          }
+        }
+      }
+      frontier = next;
+    }
+    return best;
   }
 
   // ------------------------------------------------------------ food
@@ -803,11 +1803,71 @@ export class Life {
     return cell;
   }
 
+  /** The leader of the group nearest to a place, within `km`. */
+  private nearestLeader(world: World, cell: number, km: number): number | undefined {
+    let best: number | undefined;
+    let bestKm = km;
+    for (const b of this.data.bands) {
+      const l = this.person(b.leader);
+      if (!l?.alive) continue;
+      const d = world.kmBetween(l.cell, cell);
+      if (d <= bestKm) {
+        bestKm = d;
+        best = l.id;
+      }
+    }
+    return best;
+  }
+
+  /** Checks a power aimed at a person before it is used; null when it can be used. */
+  check(kind: PowerKind, p: Person, other?: Person): PowerBlock | null {
+    const age = this.ageOf(p);
+    switch (kind) {
+      case 'fertility': {
+        const q = p.partner >= 0 ? this.person(p.partner) : undefined;
+        if (!q?.alive || q.sex === p.sex) return 'noPartner';
+        const woman = p.sex === 'f' ? p : q;
+        if (woman.pregnant) return 'pregnant';
+        if (this.ageOf(woman) < 14) return 'young';
+        return null;
+      }
+      case 'wLove':
+        if (age < 13) return 'young';
+        if (other && other.id === p.id) return 'samePerson';
+        return null;
+      case 'wEmigrate':
+        return age < ADULT_AGE ? 'young' : null;
+      case 'wLead':
+        if (age < ADULT_AGE) return 'young';
+        return this.isLeader(p) ? 'alreadyLeader' : null;
+      case 'wPeace':
+        if (age < 3) return 'young';
+        return p.rels.some((r) => r[1] < -10) ? null : 'noEnemies';
+      case 'wCourage':
+      case 'wFear':
+      case 'wAnger':
+      case 'wForgive':
+      case 'wComfort':
+        return age < 3 ? 'young' : null;
+      default:
+        return null;
+    }
+  }
+
   /** What a power does to the living (its effect on the land is handled by the World). */
-  applyEvent(e: PowerEvent, world: World): void {
+  applyEvent(e: PowerEvent, world: World): EventOutcome {
+    this.ensureBands(world);
     const rng = new Rng(e.seed).fork('life');
     const t = this.data.t;
     const within = (km: number) => this.data.people.filter((p) => p.alive && world.kmBetween(p.cell, e.cell) <= km);
+    const target = e.target !== undefined ? this.person(e.target) : undefined;
+    const outcome: EventOutcome = {};
+    if (CHRONICLED.has(e.kind) && e.cell >= 0) {
+      const near = this.nearestLeader(world, e.cell, 900);
+      this.chron('power', { s: e.kind, ...(near !== undefined ? { a: near } : {}) });
+    } else if (e.kind === 'iceAge' || e.kind === 'heatAge') {
+      this.chron('power', { s: e.kind, major: 1 });
+    }
     switch (e.kind) {
       case 'lightning':
         for (const p of this.data.people) if (p.alive && p.cell === e.cell) this.die(p, 'lightning');
@@ -828,10 +1888,11 @@ export class Life {
           p.hunger = Math.min(p.hunger, 0.25);
           p.thirst = Math.min(p.thirst, 0.25);
           this.log(p, 'healed');
+          this.addMood(p, 'miracle', 12, 15);
         }
         break;
       case 'revive': {
-        const p = e.target !== undefined ? this.person(e.target) : undefined;
+        const p = target;
         if (p && !p.alive && p.died !== undefined && t - p.died <= REVIVE_WINDOW) {
           p.alive = true;
           p.health = 1;
@@ -845,12 +1906,30 @@ export class Life {
           p.action = 'rest';
           p.actionUntil = t + 3 * 60;
           this.log(p, 'revived');
+          this.addMood(p, 'miracle', 25, 30);
+          this.chron('power', { s: 'revive', a: p.id, major: 1 });
+          // Those who grieved are glad again.
+          for (const q of this.data.people) q.moods = q.moods.filter((m) => !(m.key === 'grief' && m.other === p.id));
+          if (!this.bandById.has(p.band)) {
+            const band = this.newBand(p.id);
+            p.band = band.id;
+          }
         }
         break;
       }
       case 'createPeople': {
         const count = Math.max(1, Math.min(10, e.extra ?? 1));
-        for (let i = 0; i < count; i++) this.addPerson(world, e.cell, rng);
+        const near = this.nearestLeader(world, e.cell, world.kmPerCell * 6);
+        const band = near !== undefined ? this.person(near)!.band : this.newBand(-1).id;
+        const made: Person[] = [];
+        for (let i = 0; i < count; i++) {
+          const p = this.addPerson(world, e.cell, rng, { band });
+          if (p) made.push(p);
+        }
+        for (const p of made) for (const q of made) if (p !== q) this.addOp(p, q.id, Math.round(rng.range(5, 20)));
+        const b = this.bandById.get(band);
+        if (b && b.leader < 0) this.electLeader(b, false);
+        if (made.length > 0) this.chron('newcomers', { n: made.length, a: made[0].id, major: 1 });
         break;
       }
       case 'spawnAnimals': {
@@ -859,16 +1938,14 @@ export class Life {
         this.addHerd(species, Life.nearestLand(world, e.cell), rng.int(lo, hi));
         break;
       }
-      case 'smite': {
-        const p = e.target !== undefined ? this.person(e.target) : undefined;
-        if (p?.alive) this.die(p, 'god');
+      case 'smite':
+        if (target?.alive) this.die(target, 'god');
         break;
-      }
       case 'plague':
         for (const p of within(450)) if (!p.immune && rng.chance(0.6)) this.makeSick(p);
         break;
       case 'move': {
-        const p = e.target !== undefined ? this.person(e.target) : undefined;
+        const p = target;
         if (p?.alive) {
           p.carriedFrom = p.cell;
           p.carriedAt = t;
@@ -879,15 +1956,186 @@ export class Life {
           p.goal = 'none';
           p.action = 'carried';
           p.actionUntil = t + 2 * 60;
+          p.dest = undefined;
           this.log(p, 'carried');
+          // Carried far from the group: start a new one.
+          const leader = this.leaderOf(p);
+          if (leader && world.kmBetween(leader.cell, p.cell) > world.kmPerCell * 20) {
+            const band = this.newBand(p.id);
+            p.band = band.id;
+          }
         }
         break;
       }
       case 'harvest':
         for (const cell of [...this.food.keys()]) if (world.kmBetween(cell, e.cell) <= 400) this.food.delete(cell);
         break;
+      case 'luck':
+        if (target?.alive) {
+          target.luck = t + YEAR;
+          this.log(target, 'lucky');
+          this.addMood(target, 'luck', 15, DAYS_PER_YEAR);
+          outcome.person = target.id;
+          outcome.result = 'accepted';
+        }
+        break;
+      case 'fertility':
+        if (target?.alive && this.check('fertility', target) === null) {
+          const q = this.person(target.partner)!;
+          const [woman, man] = target.sex === 'f' ? [target, q] : [q, target];
+          woman.pregnant = { father: man.id, due: t + PREGNANCY };
+          for (const x of [woman, man]) {
+            this.log(x, 'blessedChild');
+            this.addMood(x, 'miracle', 12, 20);
+          }
+          outcome.person = target.id;
+          outcome.result = 'accepted';
+        }
+        break;
+      case 'sign': {
+        const variant = Math.max(0, Math.min(2, e.extra ?? 0));
+        const km = variant === 2 ? Infinity : variant === 1 ? 700 : 500;
+        for (const p of this.data.people) {
+          if (!p.alive || world.kmBetween(p.cell, e.cell) > km) continue;
+          this.addMood(p, 'sign', 10, 12);
+          this.log(p, 'sawSign', { n: variant });
+          p.awe = t + 4 * 60;
+        }
+        const near = this.nearestLeader(world, e.cell, 900);
+        this.chron('sign', { n: variant, ...(near !== undefined ? { a: near } : {}) });
+        break;
+      }
+      case 'wLove':
+      case 'wCourage':
+      case 'wFear':
+      case 'wAnger':
+      case 'wForgive':
+      case 'wComfort':
+      case 'wEmigrate':
+      case 'wPeace':
+      case 'wLead':
+        if (target?.alive) {
+          const other = e.other !== undefined ? this.person(e.other) : undefined;
+          outcome.person = target.id;
+          outcome.result = this.whisper(e.kind, target, other, world, t, rng);
+        }
+        break;
       default:
         break;
+    }
+    return outcome;
+  }
+
+  /** A whispered thought: a strong push, but not an order. Character decides how well it works. */
+  private whisper(kind: PowerKind, p: Person, other: Person | undefined, world: World, t: number, rng: RandomSource): 'accepted' | 'resisted' | 'noPlace' {
+    if (this.check(kind, p, other) !== null) return 'resisted';
+    const tr = p.traits;
+    const take = (chance: number) => {
+      if (rng.chance(clamp(chance, 0.05, 0.97))) return true;
+      this.log(p, 'resisted');
+      return false;
+    };
+    switch (kind) {
+      case 'wLove': {
+        if (!other?.alive) return 'resisted';
+        const op = this.opinion(p, other.id);
+        const chance = 0.9 - (op < -40 ? 0.5 : 0) - (p.partner >= 0 && p.partner !== other.id ? 0.35 : 0);
+        if (!take(chance)) return 'resisted';
+        this.setOp(p, other.id, Math.max(op, 80));
+        if (this.isCloseKin(p, other) || other.sex === p.sex || this.ageOf(other) < ADULT_AGE || this.ageOf(p) < ADULT_AGE) {
+          this.addOp(other, p.id, 20);
+          return 'accepted';
+        }
+        this.log(p, 'inLove', { other: other.id });
+        if (p.partner === other.id) return 'accepted';
+        // Love is catching: the other one is drawn to them.
+        if (this.opinion(other, p.id) >= -20) this.addOp(other, p.id, 35);
+        if (this.opinion(other, p.id) >= 50 && other.partner < 0) {
+          if (p.partner >= 0) {
+            const old = this.person(p.partner);
+            if (old?.alive) this.separate(p, old);
+            else p.partner = -1;
+          }
+          if (this.canCourt(p, other)) this.becomeCouple(p, other);
+        }
+        return 'accepted';
+      }
+      case 'wCourage':
+        if (!take(0.85 - (p.feel?.kind === 'fear' ? 0.2 : 0))) return 'resisted';
+        p.feel = { kind: 'courage', until: t + YEAR };
+        p.traits[T_BRAVE] = Math.min(100, p.traits[T_BRAVE] + 5);
+        this.addMood(p, 'courage', 10, DAYS_PER_YEAR);
+        this.log(p, 'brave');
+        return 'accepted';
+      case 'wFear':
+        if (!take(0.85 - tr[T_BRAVE] / 250)) return 'resisted';
+        p.feel = { kind: 'fear', until: t + 30 * DAY };
+        this.addMood(p, 'fear', -12, 30);
+        this.log(p, 'afraid');
+        return 'accepted';
+      case 'wAnger':
+        if (!take(0.9 - tr[T_KIND] / 220)) return 'resisted';
+        p.feel = { kind: 'anger', until: t + 15 * DAY };
+        this.addMood(p, 'anger', -10, 15);
+        this.log(p, 'angry');
+        return 'accepted';
+      case 'wForgive':
+        if (!take(0.9 - tr[T_AGGRESSIVE] / 220)) return 'resisted';
+        for (const r of p.rels) if (r[1] < 0) r[1] = 10;
+        for (const q of this.data.people) {
+          if (!q.alive || q === p) continue;
+          const r = this.findRel(q, p.id);
+          if (r && r[1] < 0) r[1] = Math.min(10, r[1] + 25);
+        }
+        p.moods = p.moods.filter((m) => m.key !== 'quarrel' && m.key !== 'anger');
+        if (p.feel?.kind === 'anger') p.feel = undefined;
+        this.addMood(p, 'forgive', 8, 20);
+        this.log(p, 'forgave');
+        return 'accepted';
+      case 'wComfort':
+        if (!take(0.95)) return 'resisted';
+        for (const m of p.moods) if (m.key === 'grief' || m.key === 'fear' || m.key === 'separated') m.v = Math.round(m.v / 2);
+        p.moods = p.moods.filter((m) => m.key !== 'quarrel');
+        if (p.feel?.kind === 'fear') p.feel = undefined;
+        p.social = 0;
+        this.addMood(p, 'comfort', 15, 10);
+        this.log(p, 'comforted');
+        return 'accepted';
+      case 'wEmigrate': {
+        const chance = 0.35 + tr[T_CURIOUS] / 250 + tr[T_BRAVE] / 250 + (p.feel?.kind === 'courage' ? 0.2 : 0);
+        if (!take(chance)) return 'resisted';
+        return this.emigrate(p, world, t) ? 'accepted' : 'noPlace';
+      }
+      case 'wPeace': {
+        if (!take(0.9 - tr[T_AGGRESSIVE] / 200)) return 'resisted';
+        for (const r of p.rels) {
+          if (r[1] >= -10) continue;
+          r[1] = 15;
+          const q = this.person(r[0]);
+          if (q?.alive) {
+            this.setOp(q, p.id, Math.max(this.opinion(q, p.id) + 30, 5));
+            this.addMood(q, 'peace', 10, 15);
+          }
+        }
+        if (p.feel?.kind === 'anger') p.feel = undefined;
+        this.addMood(p, 'peace', 10, 15);
+        this.log(p, 'madePeace');
+        return 'accepted';
+      }
+      case 'wLead': {
+        const chance = 0.35 + tr[T_AMBITIOUS] / 220 + tr[T_BRAVE] / 400 + tr[T_CLEVER] / 500;
+        if (!take(chance)) return 'resisted';
+        p.lead = t + 10 * YEAR;
+        const band = this.bandById.get(p.band);
+        if (band) {
+          band.leader = p.id;
+          this.log(p, 'leader');
+          this.chron('leader', { a: p.id, major: 1 });
+        }
+        return 'accepted';
+      }
+      default:
+        return 'resisted';
     }
   }
 }

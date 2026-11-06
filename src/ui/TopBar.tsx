@@ -2,18 +2,20 @@ import { formatNumber, t, type MessageKey } from '../i18n';
 import { SPEEDS, type SpeedIndex } from '../sim/clock';
 import type { UiState } from '../game/Game';
 import { formatHours } from './format';
-import { IconMenu, IconMoon, IconPause, IconPerson, IconRewind, IconSoundOff, IconSoundOn, IconSun } from './icons';
+import { IconBook, IconMenu, IconMoon, IconPause, IconPerson, IconRewind, IconSoundOff, IconSoundOn, IconSun } from './icons';
 
 interface Props {
   ui: UiState;
   rewindOpen: boolean;
+  chronicleOpen: boolean;
   onSpeed: (index: SpeedIndex) => void;
+  onChronicle: () => void;
   onMenu: () => void;
   onRewind: () => void;
   onSound: () => void;
 }
 
-export function TopBar({ ui, rewindOpen, onSpeed, onMenu, onRewind, onSound }: Props) {
+export function TopBar({ ui, rewindOpen, chronicleOpen, onSpeed, onChronicle, onMenu, onRewind, onSound }: Props) {
   const { date, climate } = ui;
   const climateTemp = Math.round(climate.temperature);
   return (
@@ -75,6 +77,16 @@ export function TopBar({ ui, rewindOpen, onSpeed, onMenu, onRewind, onSound }: P
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          class={`icon-btn glass${chronicleOpen ? ' is-open' : ''}`}
+          aria-label={t('top.chronicle')}
+          title={t('top.chronicle')}
+          aria-expanded={chronicleOpen}
+          onClick={onChronicle}
+        >
+          <IconBook />
+        </button>
         <button
           type="button"
           class="icon-btn glass"

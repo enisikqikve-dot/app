@@ -5,16 +5,28 @@
 import * as THREE from 'three';
 import type { Person } from '../sim/life/types';
 
-export function bubbleSymbol(p: Person): string | null {
+const CHAT: Record<string, string> = { talk: '💬', flirt: '❤️', love: '❤️', quarrel: '😠', play: '🤸', comfort: '🤗' };
+
+/** A symbol for what someone needs, feels or does right now (null: nothing to say). */
+export function bubbleSymbol(p: Person, t: number): string | null {
   if (!p.alive) return null;
   if (p.action === 'carried') return '✨';
   if (p.goal === 'safety') return '😱';
+  if (p.chat) return CHAT[p.chat.kind] ?? '💬';
+  if (p.awe !== undefined) return '😮';
   if (p.action === 'sleep') return '💤';
   if (p.sick > 0) return '🤒';
   if (p.action === 'drink') return '💧';
   if (p.goal === 'water' || p.thirst > 0.8) return '💧';
   if (p.action === 'gather') return '🫐';
   if (p.goal === 'food' || p.hunger > 0.8) return '🍖';
+  // Feelings show now and then, not all the time.
+  const now = Math.floor(t / 120 + p.id) % 3 === 0;
+  if (now && p.moods.some((m) => m.key === 'grief' && m.v <= -15 && m.until > t)) return '😢';
+  if (now && p.feel?.kind === 'fear') return '😨';
+  if (now && p.feel?.kind === 'anger') return '😠';
+  if (now && p.luck !== undefined) return '🍀';
+  if (now && p.pregnant) return '🤰';
   return null;
 }
 

@@ -30,8 +30,9 @@ import { nearestCell } from '../sim/planet/geodesic';
 import { Biome, isWater } from '../sim/planet/biomes';
 import { Overlay, World, type ClimateShift } from '../sim/world';
 import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
-import { Life, REVIVE_WINDOW, TICK } from '../sim/life/life';
-import type { DeathCause, LogKey, Person, Sex, SpeciesId } from '../sim/life/types';
+import { Life, REVIVE_WINDOW, TICK, type EventOutcome } from '../sim/life/life';
+import type { ChronicleKey, SpeciesId } from '../sim/life/types';
+import { PeopleInfo, type ChronicleLine, type FamilyTree, type PersonInfo } from './peopleInfo';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
 import { TerrainView } from '../render/terrain';
 import { TreeView } from '../render/trees';
@@ -59,10 +60,23 @@ import {
   type FxContext,
   type OngoingView,
 } from '../render/fx/effects';
+import { SkySignFx } from '../render/fx/signs';
 import { SoundEngine, type SoundName } from '../audio/sound';
 import { isLifeData, parseSaveData, sanitizeEvents, type LifeSnapshot, type SaveData } from './saveData';
 
 export type { SaveData };
+export type { Activity, ChronicleLine, FamilyTree, PersonInfo } from './peopleInfo';
+
+/** A snapshot of the living world kept in memory as compact text. */
+interface MemSnapshot {
+  t: number;
+  eventCount: number;
+  json: string;
+  periodic: boolean;
+}
+
+/** Chronicle lines that also pop up as a message (if important). */
+const NEWSWORTHY = new Set<ChronicleKey>(['birth', 'twins', 'population', 'emigrate', 'moved', 'extinct', 'leader']);
 
 const SAVE_KEY = 'enis.save.v3';
 const OLD_SAVE_KEYS = ['enis.save.v2', 'enis.save.v1'];
@@ -109,41 +123,6 @@ export interface PlaceInfo {
   food: number;
 }
 
-export type Activity =
-  | 'idle'
-  | 'rest'
-  | 'sleep'
-  | 'drink'
-  | 'gather'
-  | 'carried'
-  | 'walk.water'
-  | 'walk.food'
-  | 'walk.group'
-  | 'walk.wander'
-  | 'walk.safety'
-  | 'walk.none';
-
-export interface PersonInfo {
-  id: number;
-  name: string;
-  sex: Sex;
-  age: number;
-  alive: boolean;
-  cause: DeathCause | null;
-  revivable: boolean;
-  activity: Activity;
-  food: number;
-  water: number;
-  sleep: number;
-  health: number;
-  sick: boolean;
-  skin: 0 | 1 | 2;
-  hair: number;
-  height: 'short' | 'average' | 'tall';
-  biome: Biome;
-  log: { date: CalendarDate; key: LogKey; cause?: DeathCause }[];
-}
-
 export interface HerdInfo {
   id: number;
   species: SpeciesId;
@@ -160,8 +139,11 @@ export interface ClimateInfo {
 }
 
 export interface Notice {
-  key: MessageKey;
   id: number;
+  key?: MessageKey;
+  params?: Record<string, string | number>;
+  /** A line of the chronicle, shown as it reads there. */
+  line?: ChronicleLine;
 }
 
 export interface RewindPoint {
@@ -193,7 +175,9 @@ export interface UiState {
   /** The chosen option of the armed power (number of people, species). */
   armedOption: number | null;
   /** The invisible hand: first pick a person, then a place. */
-  carryStep: 'pick' | 'place' | null;
+  carryStep: 'pick' | 'place' | 'pick2' | null;
+  /** Grows with each line of the chronicle (so open views refresh). */
+  chronicleCount: number;
   climate: ClimateInfo;
   eventCount: number;
   soundOn: boolean;
@@ -248,7 +232,9 @@ export class Game {
   private readonly bubbles: BubbleLayer;
   private world: PlanetScene | null = null;
   private life: Life | null = null;
-  private snapshots: LifeSnapshot[] = [];
+  private snapshots: MemSnapshot[] = [];
+  private info: PeopleInfo | null = null;
+  private seenChronicle = 0;
   private spec: WorldSpec | null = null;
   private focusCell = 0;
   private pickCell = 0;
@@ -264,7 +250,6 @@ export class Game {
   private lastUiPush = 0;
   private lastSave = 0;
   private lastSnapshotReal = 0;
-  private lastPopulation = 0;
   private running = false;
   private readonly raycaster = new THREE.Raycaster();
   private readonly skyColor = new THREE.Color(SPACE_COLOR);
@@ -273,6 +258,8 @@ export class Game {
   private armed: PowerKind | null = null;
   private armedOption: number | null = null;
   private carryTarget: number | null = null;
+  /** Whispered love: the person who is to love someone. */
+  private pairFirst: number | null = null;
   private effects: Effect[] = [];
   private ongoing = new Map<number, OngoingView>();
   private lastOverlayMinutes = -1;
@@ -321,6 +308,7 @@ export class Game {
       armed: null,
       armedOption: null,
       carryStep: null,
+      chronicleCount: 0,
       climate: { kind: null, temperature: 0, dust: 0 },
       eventCount: 0,
       soundOn: this.sound.enabled,
@@ -379,8 +367,8 @@ export class Game {
   /** A few snapshots survive a reload: the latest ones and one older one. */
   private persistentSnapshots(): LifeSnapshot[] {
     const all = this.snapshots;
-    if (all.length <= 4) return all;
-    return [all[0], ...all.slice(-3)];
+    const keep = all.length <= 4 ? all : [all[0], ...all.slice(-3)];
+    return keep.map((s) => ({ t: s.t, eventCount: s.eventCount, periodic: s.periodic, data: JSON.parse(s.json) }));
   }
 
   private save(): void {
@@ -444,7 +432,9 @@ export class Game {
     if (save?.life && isLifeData(save.life)) {
       life = Life.restore(save.life);
       minutes = Math.max(save.minutes, life.t);
-      this.snapshots = (save.snaps ?? []).filter((s) => s.eventCount <= events.length && s.t <= life.t);
+      this.snapshots = (save.snaps ?? [])
+        .filter((s) => s.eventCount <= events.length && s.t <= life.t)
+        .map((s) => ({ t: s.t, eventCount: s.eventCount, periodic: s.periodic, json: JSON.stringify(s.data) }));
     } else {
       const home = Life.findHome(world);
       minutes = save ? save.minutes : morningAt(new Clock().minutes, longitudeOf(planet.positions[home * 3], planet.positions[home * 3 + 2]));
@@ -452,8 +442,9 @@ export class Game {
       this.snapshots = [];
     }
     this.life = life;
+    this.info = new PeopleInfo(life, planet);
+    this.seenChronicle = life.chronicle.length;
     this.clock.minutes = minutes;
-    this.lastPopulation = life.population();
 
     const root = new THREE.Group();
     const fxRoot = new THREE.Group();
@@ -502,6 +493,7 @@ export class Game {
       timelapse: this.clock.timelapse,
       eventCount: world.events.length,
       population: life.population(),
+      chronicleCount: life.chronicle.length,
     });
     this.save();
     if (!this.running) {
@@ -593,12 +585,14 @@ export class Game {
     }
     this.armed = kind;
     this.carryTarget = null;
+    this.pairFirst = null;
     const options = kind ? POWER_OPTIONS[kind] : undefined;
     this.armedOption = options ? options[0] : null;
     this.cameraCtl.brushMode = !!kind && powerDef(kind).target === 'brush';
     if (!kind) this.aim.hide();
     this.canvas.style.cursor = kind ? 'crosshair' : '';
-    this.ui.set({ armed: kind, armedOption: this.armedOption, carryStep: kind === 'move' ? 'pick' : null });
+    const target = kind ? powerDef(kind).target : null;
+    this.ui.set({ armed: kind, armedOption: this.armedOption, carryStep: target === 'carry' || target === 'pair' ? 'pick' : null });
   }
 
   setArmedOption(value: number): void {
@@ -610,8 +604,8 @@ export class Game {
     return { id: this.nextEventId++, kind, minutes: this.life?.t ?? this.clock.minutes, cell, seed: randomSeed() };
   }
 
-  private notify(key: MessageKey): void {
-    this.ui.set({ notice: { key, id: ++this.noticeId } });
+  private notify(key: MessageKey, params?: Record<string, string | number>): void {
+    this.ui.set({ notice: { key, params, id: ++this.noticeId } });
   }
 
   private play(name: SoundName, at?: THREE.Vector3): void {
@@ -621,13 +615,14 @@ export class Game {
   }
 
   /** Applies a power to the land and the living, at the current simulation step. */
-  private commit(event: PowerEvent): void {
-    if (!this.world || !this.life) return;
+  private commit(event: PowerEvent): EventOutcome {
+    if (!this.world || !this.life) return {};
     this.takeSnapshot(false);
     event.minutes = this.life.t;
     this.world.world.apply(event);
-    this.life.applyEvent(event, this.world.world);
+    const outcome = this.life.applyEvent(event, this.world.world);
     this.afterEvent();
+    return outcome;
   }
 
   private castGlobal(kind: PowerKind): void {
@@ -650,6 +645,7 @@ export class Game {
     if (def.target === 'point') this.castAt(clientX, clientY);
     else if (def.target === 'person' || def.target === 'dead') this.castOnPerson(clientX, clientY, def.target === 'dead');
     else if (def.target === 'carry') this.carry(clientX, clientY);
+    else if (def.target === 'pair') this.pair(clientX, clientY);
   }
 
   private castAt(clientX: number, clientY: number): void {
@@ -743,6 +739,10 @@ export class Game {
         burst(fx, 'sparkle', at, 1);
         this.play('thud', at);
         break;
+      case 'sign':
+        this.effects.push(new SkySignFx(fx, at, event.extra ?? 0, this.cameraCtl.camera));
+        this.play('chime', at);
+        break;
       default:
         break;
     }
@@ -761,19 +761,114 @@ export class Game {
       this.notify(dead ? 'notice.notRevivable' : 'notice.noPerson');
       return;
     }
-    const person = this.life.person(entity.id)!;
-    const event = this.newEvent(this.armed, person.cell);
-    event.target = person.id;
-    const at = entity.pos.clone();
-    this.commit(event);
-    if (this.armed === 'revive') {
-      burst(this.world.fx, 'spirit', at, 2);
-      this.play('chime', at);
-    } else {
-      burst(this.world.fx, 'heal', at, 0.6);
-      this.play('chill', at);
+    this.castOn(this.armed, entity.id);
+  }
+
+  /**
+   * Uses a power on one person (from tapping them, or from their file).
+   * Powers aimed at a place act where the person stands.
+   */
+  castOn(kind: PowerKind, id: number): void {
+    if (!this.world || !this.life) return;
+    const p = this.life.person(id);
+    if (!p) return;
+    const def = powerDef(kind);
+    if (def.target === 'pair') {
+      if (!p.alive) return;
+      const block = this.life.check(kind, p);
+      if (block) {
+        this.notify(`notice.block.${block}` as MessageKey, { name: p.name });
+        return;
+      }
+      if (this.armed !== kind) this.arm(kind);
+      this.pairFirst = p.id;
+      this.selectEntity('person', p.id);
+      this.ui.set({ carryStep: 'pick2' });
+      return;
     }
-    this.selectEntity('person', person.id);
+    const at = (this.world.lifeView.shownPosition(p.id) ?? this.surfacePoint(this.world.world.planet, p.cell, new THREE.Vector3())).clone();
+    if (def.target === 'point' || def.target === 'global') {
+      const event = this.newEvent(kind, p.cell);
+      const options = POWER_OPTIONS[kind];
+      if (options) event.extra = this.armed === kind && this.armedOption !== null ? this.armedOption : options[0];
+      this.commit(event);
+      if (kind === 'sign') this.effects.push(new SkySignFx(this.world.fx, at, event.extra ?? 0, this.cameraCtl.camera));
+      else burst(this.world.fx, kind === 'harvest' ? 'gold' : kind === 'plague' ? 'plague' : 'heal', at, 1.5);
+      this.play(kind === 'plague' ? 'dry' : 'chime', at);
+      return;
+    }
+    if (def.target === 'dead' ? p.alive : !p.alive) return;
+    const block = this.life.check(kind, p);
+    if (block) {
+      this.notify(`notice.block.${block}` as MessageKey, { name: p.name });
+      return;
+    }
+    const event = this.newEvent(kind, p.cell);
+    event.target = p.id;
+    const outcome = this.commit(event);
+    this.afterPersonPower(kind, p.name, at, outcome);
+    this.selectEntity('person', p.id);
+  }
+
+  /** Effects and messages after a power aimed at a person. */
+  private afterPersonPower(kind: PowerKind, name: string, at: THREE.Vector3, outcome: EventOutcome): void {
+    if (!this.world) return;
+    const fx = this.world.fx;
+    if (kind === 'revive') {
+      burst(fx, 'spirit', at, 2);
+      this.play('chime', at);
+    } else if (kind === 'smite') {
+      burst(fx, 'heal', at, 0.6);
+      this.play('chill', at);
+    } else if (kind === 'luck') {
+      burst(fx, 'gold', at, 0.5);
+      this.play('chime', at);
+      this.notify('notice.luck', { name });
+    } else if (kind === 'fertility') {
+      burst(fx, 'heal', at, 0.6);
+      this.play('chime', at);
+      this.notify('notice.fertility', { name });
+    } else if (powerDef(kind).category === 'whisper') {
+      // Whispers are invisible to the people; you see a faint shimmer.
+      burst(fx, 'whisper', at, 0.5);
+      if (outcome.result === 'accepted') this.notify(`notice.whisper.${kind}` as MessageKey, { name });
+      else if (outcome.result === 'noPlace') this.notify('notice.whisper.noPlace', { name });
+      else this.notify('notice.whisper.resisted', { name });
+    }
+  }
+
+  /** Whispered love: first the one who loves, then the one to be loved. */
+  private pair(clientX: number, clientY: number): void {
+    if (!this.world || !this.life || !this.armed) return;
+    const entity = this.pickEntity(clientX, clientY, (e) => e.kind === 'person' && !!this.life!.person(e.id)?.alive);
+    if (!entity) {
+      this.notify('notice.noPerson');
+      return;
+    }
+    if (this.pairFirst === null) {
+      this.castOn(this.armed, entity.id);
+      return;
+    }
+    const lover = this.life.person(this.pairFirst);
+    const beloved = this.life.person(entity.id);
+    if (!lover?.alive || !beloved?.alive) return;
+    const block = this.life.check(this.armed, lover, beloved);
+    if (block) {
+      this.notify(`notice.block.${block}` as MessageKey, { name: lover.name });
+      return;
+    }
+    const event = this.newEvent(this.armed, lover.cell);
+    event.target = lover.id;
+    event.other = beloved.id;
+    const at = (this.world.lifeView.shownPosition(lover.id) ?? entity.pos).clone();
+    const outcome = this.commit(event);
+    burst(this.world.fx, 'whisper', at, 0.5);
+    burst(this.world.fx, 'whisper', entity.pos.clone(), 0.4);
+    if (outcome.result === 'accepted') this.notify('notice.whisper.wLove', { name: lover.name, other: beloved.name });
+    else this.notify('notice.whisper.resisted', { name: lover.name });
+    this.pairFirst = null;
+    this.selectEntity('person', lover.id);
+    this.ui.set({ carryStep: 'pick' });
   }
 
   private carry(clientX: number, clientY: number): void {
@@ -933,7 +1028,7 @@ export class Game {
     const eventCount = this.world.world.events.length;
     const last = this.snapshots[this.snapshots.length - 1];
     if (last && last.t === t && last.eventCount === eventCount) return;
-    this.snapshots.push({ t, eventCount, data: this.life.serialize(), periodic });
+    this.snapshots.push({ t, eventCount, json: this.life.snapshotJson(), periodic });
     this.pruneSnapshots();
   }
 
@@ -941,7 +1036,7 @@ export class Game {
   private pruneSnapshots(): void {
     if (!this.life) return;
     const now = this.life.t;
-    const out: LifeSnapshot[] = [];
+    const out: MemSnapshot[] = [];
     let lastYear = -1;
     let lastDecade = -1;
     for (const s of this.snapshots) {
@@ -970,8 +1065,8 @@ export class Game {
     this.snapshots = out.filter((s) => !drop.has(s));
   }
 
-  private findSnapshot(p: { minutes: number; eventCount: number }): LifeSnapshot | null {
-    let best: LifeSnapshot | null = null;
+  private findSnapshot(p: { minutes: number; eventCount: number }): MemSnapshot | null {
+    let best: MemSnapshot | null = null;
     for (const s of this.snapshots) {
       if (s.t <= p.minutes && s.eventCount <= p.eventCount && (!best || s.t >= best.t)) best = s;
     }
@@ -1007,7 +1102,7 @@ export class Game {
     const kept = world.events.slice(0, point.eventCount).map((e) => ({ ...e, stamps: e.stamps ? [...e.stamps] : undefined }));
     // Back to the snapshot, then replay the powers used after it.
     world.rebuild(kept.slice(0, snap.eventCount));
-    const life = Life.restore(snap.data);
+    const life = Life.restore(snap.json, { archive: this.life.archive, chronicle: this.life.chronicle });
     for (let i = snap.eventCount; i < kept.length; i++) {
       const e = kept[i];
       life.advanceTo(e.minutes, world);
@@ -1016,20 +1111,58 @@ export class Game {
     }
     life.advanceTo(point.minutes, world);
     this.life = life;
+    this.info = new PeopleInfo(life, world.planet);
+    this.seenChronicle = life.chronicle.length;
     this.snapshots = this.snapshots.filter((s) => s.t <= point.minutes && s.eventCount <= point.eventCount);
     this.nextEventId = kept.reduce((m, e) => Math.max(m, e.id), 0) + 1;
     this.clock.minutes = Math.max(point.minutes, life.t);
-    this.lastPopulation = life.population();
     if (this.selection?.kind === 'herd' && !life.herd(this.selection.id)) this.clearSelection();
+    if (this.selection?.kind === 'person' && !life.anyone(this.selection.id)) this.clearSelection();
     this.refreshEverything();
     if (this.selectedCell !== null) this.ui.set({ place: this.placeInfo(this.world.world.planet, this.selectedCell) });
-    this.ui.set({ eventCount: kept.length, date: dateFromMinutes(this.clock.minutes), population: life.population() });
+    this.ui.set({ eventCount: kept.length, date: dateFromMinutes(this.clock.minutes), population: life.population(), chronicleCount: life.chronicle.length });
     this.save();
     this.play('chill');
     this.notify('notice.rewound');
   }
 
   // ---------------------------------------------------------------- selection
+
+  /** Opens someone's file: a living person on the planet, or someone from the archive. */
+  selectPerson(id: number): void {
+    if (!this.life?.anyone(id)) return;
+    if (this.life.person(id)) {
+      this.selectEntity('person', id);
+      return;
+    }
+    this.selectedCell = null;
+    this.selection = { kind: 'person', id };
+    this.following = false;
+    this.marker.hide();
+    this.pushUi();
+  }
+
+  familyTree(id: number): FamilyTree | null {
+    return this.info?.familyTree(id) ?? null;
+  }
+
+  chronicleLines(limit?: number): ChronicleLine[] {
+    return this.info?.chronicle(limit) ?? [];
+  }
+
+  /** New lines in the chronicle; important ones pop up as a message. */
+  private announceChronicle(life: Life): void {
+    const all = life.chronicle;
+    if (all.length === this.seenChronicle) return;
+    for (let i = this.seenChronicle; i < all.length; i++) {
+      const e = all[i];
+      const followed = this.selection?.kind === 'person' && e.key === 'death' && e.a === this.selection.id;
+      if (!followed && !(e.major && NEWSWORTHY.has(e.key)) && !(e.key === 'extinct')) continue;
+      if (this.info) this.ui.set({ notice: { id: ++this.noticeId, line: this.info.chronicleLine(e, i) } });
+    }
+    this.seenChronicle = all.length;
+    this.ui.set({ chronicleCount: all.length });
+  }
 
   private selectEntity(kind: 'person' | 'herd', id: number): void {
     this.selectedCell = null;
@@ -1111,9 +1244,7 @@ export class Game {
       this.lastSnapshotReal = now;
       this.takeSnapshot(true);
     }
-    const population = life.population();
-    if (population === 0 && this.lastPopulation > 0) this.notify('notice.extinct');
-    this.lastPopulation = population;
+    this.announceChronicle(life);
 
     const t = this.clock.minutes;
     const yf = this.clock.yearFraction();
@@ -1242,7 +1373,7 @@ export class Game {
       const p = this.life.person(e.id);
       if (!p) continue;
       const selected = this.selection?.kind === 'person' && selectedId === p.id;
-      items.push({ id: p.id, pos: e.pos, symbol: bubbleSymbol(p), label: selected ? p.name : undefined, selected });
+      items.push({ id: p.id, pos: e.pos, symbol: bubbleSymbol(p, this.life.t), label: selected ? p.name : undefined, selected });
     }
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
@@ -1250,7 +1381,7 @@ export class Game {
     if (this.selection) {
       const pos = lifeView.shownPosition(this.selection.id);
       if (pos) this.marker.moveTo(pos);
-      else if (this.selection.kind === 'herd') this.marker.hide();
+      else this.marker.hide();
     }
   }
 
@@ -1299,8 +1430,8 @@ export class Game {
     };
     if (this.selectedCell !== null) patch.place = this.placeInfo(world.planet, this.selectedCell);
     if (this.selection?.kind === 'person') {
-      const p = this.life.person(this.selection.id);
-      patch.person = p ? this.personInfo(p) : null;
+      const p = this.life.anyone(this.selection.id);
+      patch.person = p && this.info ? this.info.person(p) : null;
       patch.herd = null;
       patch.place = null;
     } else if (this.selection?.kind === 'herd') {
@@ -1322,35 +1453,6 @@ export class Game {
       patch.herd = null;
     }
     this.ui.set(patch);
-  }
-
-  private personInfo(p: Person): PersonInfo {
-    const t = this.life!.t;
-    const activity: Activity = !p.alive
-      ? 'idle'
-      : p.action === 'walk'
-        ? (`walk.${p.goal}` as Activity)
-        : (p.action as Activity);
-    return {
-      id: p.id,
-      name: p.name,
-      sex: p.sex,
-      age: Math.floor(((p.died ?? t) - p.born) / YEAR),
-      alive: p.alive,
-      cause: p.cause ?? null,
-      revivable: !p.alive && p.died !== undefined && t - p.died <= REVIVE_WINDOW,
-      activity,
-      food: 1 - p.hunger,
-      water: 1 - p.thirst,
-      sleep: p.energy,
-      health: Math.max(0, p.health),
-      sick: p.sick > 0,
-      skin: p.look.skin < 0.34 ? 0 : p.look.skin < 0.67 ? 1 : 2,
-      hair: p.look.hair,
-      height: p.look.height < 0.96 ? 'short' : p.look.height > 1.05 ? 'tall' : 'average',
-      biome: this.world!.world.planet.biome[p.cell] as Biome,
-      log: [...p.log].reverse().slice(0, 12).map((l) => ({ date: dateFromMinutes(l.t), key: l.key, cause: l.cause })),
-    };
   }
 
   private placeInfo(planet: PlanetData, cell: number): PlaceInfo {

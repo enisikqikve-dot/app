@@ -13,7 +13,8 @@ import { nearestCell } from '../sim/planet/geodesic';
 import type { Life } from '../sim/life/life';
 import { REVIVE_WINDOW } from '../sim/life/life';
 import type { Herd, Person, SpeciesId } from '../sim/life/types';
-import { CLOTH_COLORS, HAIR_COLORS } from '../sim/life/types';
+import { CLOTH_COLORS, HAIR_COLORS, HAIR_GREY } from '../sim/life/types';
+import { MINUTES_PER_YEAR } from '../sim/clock';
 import { SPECIES_IDS } from '../sim/life/species';
 import type { TerrainView } from './terrain';
 import { R } from './scale';
@@ -21,6 +22,15 @@ import { R } from './scale';
 const PERSON_SCALE = 1.45;
 const MAX_PEOPLE = 360;
 const MAX_GRAVES = 400;
+/** Graves stay visible for this long. */
+const GRAVE_YEARS = 12;
+
+/** Children are drawn smaller: a baby is about 45 % of an adult. */
+function ageScale(age: number): number {
+  if (age >= 17) return 1;
+  if (age < 3) return 0.45 + age * 0.04;
+  return 0.57 + ((age - 3) / 14) * 0.43;
+}
 const MAX_ANIMALS = 900;
 const SKIN_LIGHT = new THREE.Color(0xf0caa6);
 const SKIN_DARK = new THREE.Color(0x4f3220);
@@ -283,16 +293,26 @@ export class LifeView {
     let dots = 0;
     const near = cameraDistance < 70;
 
+    const grave = (cell: number, spot: [number, number]) => {
+      if (graves >= MAX_GRAVES || !near) return;
+      entityDir(planet, cell, -1, 0, spot, this.v);
+      this.ground(this.v, cell, this.w);
+      this.q.setFromUnitVectors(Y, this.v);
+      this.m.compose(this.w, this.q, this.s.setScalar(1));
+      this.graves.setMatrixAt(graves++, this.m);
+    };
+    // Graves of those who died in the last years (newest first).
+    const archive = life.archive;
+    for (let i = archive.length - 1; i >= 0 && graves < MAX_GRAVES && near; i--) {
+      const a = archive[i];
+      if (gameMinutes - a.died > GRAVE_YEARS * MINUTES_PER_YEAR) break;
+      grave(a.cell, a.spot);
+    }
+
     for (const p of life.people) {
       const recent = !p.alive && p.died !== undefined && gameMinutes - p.died < REVIVE_WINDOW;
       if (!p.alive && !recent) {
-        if (graves < MAX_GRAVES && near) {
-          entityDir(planet, p.cell, -1, 0, p.spot, this.v);
-          this.ground(this.v, p.cell, this.w);
-          this.q.setFromUnitVectors(Y, this.v);
-          this.m.compose(this.w, this.q, this.s.setScalar(1));
-          this.graves.setMatrixAt(graves++, this.m);
-        }
+        grave(p.cell, p.spot);
         continue;
       }
       if (n >= MAX_PEOPLE) break;
@@ -310,7 +330,8 @@ export class LifeView {
       // Pose.
       const lying = !p.alive || p.action === 'sleep';
       orient(up, this.facing(p), this.q);
-      const draw = this.s.setScalar(p.look.height);
+      const age = ((p.died ?? gameMinutes) - p.born) / MINUTES_PER_YEAR;
+      const draw = this.s.setScalar(p.look.height * ageScale(age));
       const at = this.w.copy(pos);
       if (lying) {
         this.q2.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
@@ -326,7 +347,7 @@ export class LifeView {
       if (p.alive) {
         this.body.setColorAt(n, this.c.setHex(CLOTH_COLORS[p.look.clothes] ?? CLOTH_COLORS[0]));
         this.head.setColorAt(n, this.c.copy(SKIN_LIGHT).lerp(SKIN_DARK, p.look.skin));
-        this.hair.setColorAt(n, this.c.setHex(HAIR_COLORS[p.look.hair] ?? HAIR_COLORS[0]));
+        this.hair.setColorAt(n, this.c.setHex(HAIR_COLORS[age >= 52 ? HAIR_GREY : p.look.hair] ?? HAIR_COLORS[0]));
       } else {
         this.body.setColorAt(n, DEAD);
         this.head.setColorAt(n, DEAD);
