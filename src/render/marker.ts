@@ -47,3 +47,29 @@ export class PlaceMarker {
     this.beam.scale.set(base * 0.6, base * 4, base * 0.6);
   }
 }
+
+/** A thin white ring that shows where (and how big) a power will hit. */
+export class AimRing {
+  readonly mesh: THREE.Mesh;
+
+  constructor() {
+    this.mesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.94, 1, 96).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }),
+    );
+    this.mesh.visible = false;
+    this.mesh.renderOrder = 7;
+  }
+
+  show(point: THREE.Vector3, radiusUnits: number): void {
+    const n = point.clone().normalize();
+    this.mesh.position.copy(point).addScaledVector(n, 0.15);
+    this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    this.mesh.scale.setScalar(Math.max(0.4, radiusUnits));
+    this.mesh.visible = true;
+  }
+
+  hide(): void {
+    this.mesh.visible = false;
+  }
+}

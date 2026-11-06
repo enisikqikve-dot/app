@@ -1,8 +1,10 @@
-import { formatNumber, t } from '../i18n';
+import { formatNumber, t, type MessageKey } from '../i18n';
 import type { PlaceInfo } from '../game/Game';
 import { isWater } from '../sim/planet/biomes';
 import { biomeInfo, biomeName, climateZone, formatHours, formatLatLon, formatTemperature, moistureLabel } from './format';
 import { IconClose, IconMoon, IconSun } from './icons';
+
+const HOT = new Set(['burning', 'lava']);
 
 export function PlacePanel({ place, onClose }: { place: PlaceInfo; onClose: () => void }) {
   const water = isWater(place.biome);
@@ -22,7 +24,14 @@ export function PlacePanel({ place, onClose }: { place: PlaceInfo; onClose: () =
       <div class="place-head">
         <div>
           <h2 class="place-title">{biomeName(place.biome)}</h2>
-          {state && <span class="chip chip-cold">{state}</span>}
+          <div class="chips">
+            {state && <span class="chip chip-cold">{state}</span>}
+            {place.conditions.map((c) => (
+              <span key={c} class={`chip ${HOT.has(c) ? 'chip-hot' : 'chip-cond'}`}>
+                {t(`cond.${c}` as MessageKey)}
+              </span>
+            ))}
+          </div>
         </div>
         <button type="button" class="icon-btn small" aria-label={t('info.close')} title={t('info.close')} onClick={onClose}>
           <IconClose size={18} />

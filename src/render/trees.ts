@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Rng } from '../core/rng';
+import { Rng, mixSeeds } from '../core/rng';
 import type { PlanetData } from '../sim/planet/generate';
 import { Biome, TREE_DENSITY } from '../sim/planet/biomes';
 import type { SeasonUniforms } from './scale';
@@ -75,6 +75,7 @@ function treeMaterial(season: SeasonUniforms, autumn: boolean): THREE.MeshStanda
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSeason = season.uSeason;
     shader.uniforms.uSeasonCos = season.uSeasonCos;
+    shader.uniforms.uGlobalTemp = season.uGlobalTemp;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -83,6 +84,7 @@ function treeMaterial(season: SeasonUniforms, autumn: boolean): THREE.MeshStanda
         attribute vec3 aTreeClimate;
         uniform float uSeason;
         uniform float uSeasonCos;
+        uniform float uGlobalTemp;
         varying float vSnow;
         varying float vAutumn;
         varying float vCrown;`,
@@ -94,7 +96,7 @@ function treeMaterial(season: SeasonUniforms, autumn: boolean): THREE.MeshStanda
           vec3 base = vec3(instanceMatrix[3]);
           float sinLat = base.y / length(base);
           float hemi = clamp(sinLat * 8.0, -1.0, 1.0);
-          float tNow = aTreeClimate.x + aTreeClimate.y * hemi * uSeason + (aTreeClimate.z - 0.5) * 3.0;
+          float tNow = aTreeClimate.x + aTreeClimate.y * hemi * uSeason + uGlobalTemp + (aTreeClimate.z - 0.5) * 3.0;
           float upness = clamp(normal.y * 1.4, 0.0, 1.0);
           vSnow = smoothstep(0.5, -2.5, tNow) * aCrown * (0.35 + 0.65 * upness);
           vAutumn = ${autumn ? 'clamp(-uSeasonCos * hemi * 1.4, 0.0, 1.0) * smoothstep(4.0, 9.0, aTreeClimate.x) * smoothstep(19.0, 15.0, aTreeClimate.x)' : '0.0'};
@@ -119,98 +121,151 @@ function treeMaterial(season: SeasonUniforms, autumn: boolean): THREE.MeshStanda
   return material;
 }
 
-interface Placement {
+interface TreeInstance {
+  face: number;
   matrix: THREE.Matrix4;
   color: THREE.Color;
   climate: [number, number, number];
+  /** A tree shows while the face's vegetation is above this (0 … 1). */
+  threshold: number;
 }
 
-export function buildTrees(
-  planet: PlanetData,
-  faceBiome: Uint8Array,
-  facePositions: Float32Array,
-  season: SeasonUniforms,
-): THREE.Group {
-  const rng = new Rng(planet.seed).fork('trees');
-  const { faces, heightM, temperature, seasonAmplitude } = planet;
-  const byKind: Record<TreeKind, Placement[]> = { conifer: [], broadleaf: [], tropical: [] };
+const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  // First pass: how many trees would the forests want?
-  let wanted = 0;
-  for (let f = 0; f < faceBiome.length; f++) wanted += TREE_DENSITY[faceBiome[f]] ?? 0;
-  const thin = Math.min(1, MAX_TREES / Math.max(1, wanted));
+/**
+ * All trees of the planet. Every face gets its own random generator, so
+ * rebuilding after a change keeps the trees of untouched faces exactly in place.
+ */
+export class TreeView {
+  readonly group = new THREE.Group();
+  private meshes: { kind: TreeKind; mesh: THREE.InstancedMesh; items: TreeInstance[] }[] = [];
+  /** face → list of (mesh index << 20 | instance index). */
+  private byFace = new Map<number, number[]>();
+  private readonly season: SeasonUniforms;
 
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
-  const p = new THREE.Vector3();
-  const up = new THREE.Vector3();
-  const yAxis = new THREE.Vector3(0, 1, 0);
-  const q = new THREE.Quaternion();
-  const spin = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
+  constructor(season: SeasonUniforms) {
+    this.season = season;
+    this.group.name = 'trees';
+  }
 
-  for (let f = 0; f < faceBiome.length; f++) {
-    const biome = faceBiome[f] as Biome;
-    const kind = KIND_BY_BIOME[biome];
-    const density = (TREE_DENSITY[biome] ?? 0) * thin;
-    if (!kind || density <= 0) continue;
-    const cells = [faces[f * 3], faces[f * 3 + 1], faces[f * 3 + 2]];
-    if (cells.some((cell) => heightM[cell] < 0)) continue; // no trees in the water
+  dispose(): void {
+    for (const { mesh } of this.meshes) {
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+      this.group.remove(mesh);
+    }
+    this.meshes = [];
+    this.byFace.clear();
+  }
 
-    let n = Math.floor(density);
-    if (rng.chance(density - n)) n++;
-    if (n === 0) continue;
+  rebuild(planet: PlanetData, faceBiome: Uint8Array, facePositions: Float32Array, veg: (face: number) => number): void {
+    this.dispose();
+    const { faces, heightM, temperature, seasonAmplitude } = planet;
+    const byKind: Record<TreeKind, TreeInstance[]> = { conifer: [], broadleaf: [], tropical: [] };
 
-    a.fromArray(facePositions, f * 9);
-    b.fromArray(facePositions, f * 9 + 3);
-    c.fromArray(facePositions, f * 9 + 6);
-    const meanT = (temperature[cells[0]] + temperature[cells[1]] + temperature[cells[2]]) / 3;
-    const amp = (seasonAmplitude[cells[0]] + seasonAmplitude[cells[1]] + seasonAmplitude[cells[2]]) / 3;
-    const palette = CROWN_COLORS[kind];
+    let wanted = 0;
+    for (let f = 0; f < faceBiome.length; f++) wanted += TREE_DENSITY[faceBiome[f]] ?? 0;
+    const thin = Math.min(1, MAX_TREES / Math.max(1, wanted));
 
-    for (let k = 0; k < n; k++) {
-      let u = rng.next();
-      let v = rng.next();
-      if (u + v > 1) {
-        u = 1 - u;
-        v = 1 - v;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+    const ac = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const q = new THREE.Quaternion();
+    const spin = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+
+    for (let f = 0; f < faceBiome.length; f++) {
+      const biome = faceBiome[f] as Biome;
+      const kind = KIND_BY_BIOME[biome];
+      const density = (TREE_DENSITY[biome] ?? 0) * thin;
+      if (!kind || density <= 0) continue;
+      const cells = [faces[f * 3], faces[f * 3 + 1], faces[f * 3 + 2]];
+      if (cells.some((cell) => heightM[cell] < 0)) continue; // no trees in the water
+
+      const rng = new Rng(mixSeeds(planet.seed, f));
+      let n = Math.floor(density);
+      if (rng.chance(density - n)) n++;
+      if (n === 0) continue;
+
+      a.fromArray(facePositions, f * 9);
+      b.fromArray(facePositions, f * 9 + 3);
+      c.fromArray(facePositions, f * 9 + 6);
+      ab.subVectors(b, a);
+      ac.subVectors(c, a);
+      const meanT = (temperature[cells[0]] + temperature[cells[1]] + temperature[cells[2]]) / 3;
+      const amp = (seasonAmplitude[cells[0]] + seasonAmplitude[cells[1]] + seasonAmplitude[cells[2]]) / 3;
+      const palette = CROWN_COLORS[kind];
+
+      for (let k = 0; k < n; k++) {
+        let u = rng.next();
+        let v = rng.next();
+        if (u + v > 1) {
+          u = 1 - u;
+          v = 1 - v;
+        }
+        p.copy(a).addScaledVector(ab, u).addScaledVector(ac, v);
+        up.copy(p).normalize();
+        q.setFromUnitVectors(yAxis, up);
+        spin.setFromAxisAngle(yAxis, rng.range(0, Math.PI * 2));
+        q.multiply(spin);
+        const s = rng.range(0.75, 1.35) * (kind === 'tropical' && biome === Biome.Savanna ? 1.2 : 1);
+        scale.set(s, s * rng.range(0.9, 1.15), s);
+        byKind[kind].push({
+          face: f,
+          matrix: new THREE.Matrix4().compose(p, q, scale),
+          color: new THREE.Color(rng.pick(palette)).multiplyScalar(rng.range(0.85, 1.12)),
+          climate: [meanT, amp, rng.next()],
+          threshold: rng.next() * 0.9 + 0.05,
+        });
       }
-      p.copy(a).addScaledVector(b.clone().sub(a), u).addScaledVector(c.clone().sub(a), v);
-      up.copy(p).normalize();
-      q.setFromUnitVectors(yAxis, up);
-      spin.setFromAxisAngle(yAxis, rng.range(0, Math.PI * 2));
-      q.multiply(spin);
-      const s = rng.range(0.75, 1.35) * (kind === 'tropical' && biome === Biome.Savanna ? 1.2 : 1);
-      scale.set(s, s * rng.range(0.9, 1.15), s);
-      const color = new THREE.Color(rng.pick(palette)).multiplyScalar(rng.range(0.85, 1.12));
-      byKind[kind].push({
-        matrix: new THREE.Matrix4().compose(p, q, scale),
-        color,
-        climate: [meanT, amp, rng.next()],
+    }
+
+    for (const kind of Object.keys(byKind) as TreeKind[]) {
+      const items = byKind[kind];
+      if (items.length === 0) continue;
+      const geometry = treeGeometry(kind);
+      const climate = new Float32Array(items.length * 3);
+      items.forEach((t, i) => climate.set(t.climate, i * 3));
+      geometry.setAttribute('aTreeClimate', new THREE.InstancedBufferAttribute(climate, 3));
+      const mesh = new THREE.InstancedMesh(geometry, treeMaterial(this.season, kind === 'broadleaf'), items.length);
+      const meshIndex = this.meshes.length;
+      items.forEach((t, i) => {
+        mesh.setMatrixAt(i, veg(t.face) > t.threshold ? t.matrix : HIDDEN);
+        mesh.setColorAt(i, t.color);
+        const list = this.byFace.get(t.face);
+        const code = (meshIndex << 20) | i;
+        if (list) list.push(code);
+        else this.byFace.set(t.face, [code]);
       });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.name = `trees-${kind}`;
+      this.meshes.push({ kind, mesh, items });
+      this.group.add(mesh);
     }
   }
 
-  const group = new THREE.Group();
-  group.name = 'trees';
-  for (const kind of Object.keys(byKind) as TreeKind[]) {
-    const list = byKind[kind];
-    if (list.length === 0) continue;
-    const geometry = treeGeometry(kind);
-    const climate = new Float32Array(list.length * 3);
-    list.forEach((t, i) => climate.set(t.climate, i * 3));
-    geometry.setAttribute('aTreeClimate', new THREE.InstancedBufferAttribute(climate, 3));
-    const mesh = new THREE.InstancedMesh(geometry, treeMaterial(season, kind === 'broadleaf'), list.length);
-    list.forEach((t, i) => {
-      mesh.setMatrixAt(i, t.matrix);
-      mesh.setColorAt(i, t.color);
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    mesh.name = `trees-${kind}`;
-    group.add(mesh);
+  /** Shows or hides the trees of some faces depending on their vegetation (fire, storms …). */
+  updateFaces(faces: Iterable<number>, veg: (face: number) => number): void {
+    const dirty = new Set<number>();
+    for (const f of faces) {
+      const list = this.byFace.get(f);
+      if (!list) continue;
+      const v = veg(f);
+      for (const code of list) {
+        const m = code >>> 20;
+        const i = code & 0xfffff;
+        const { mesh, items } = this.meshes[m];
+        mesh.setMatrixAt(i, v > items[i].threshold ? items[i].matrix : HIDDEN);
+        dirty.add(m);
+      }
+    }
+    for (const m of dirty) this.meshes[m].mesh.instanceMatrix.needsUpdate = true;
   }
-  return group;
 }

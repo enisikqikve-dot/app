@@ -79,10 +79,57 @@ export function baseTemperature(latitude: number): number {
   return -22 + 50 * Math.pow(Math.cos(latitude), 1.3);
 }
 
+/** Steps from every cell to the nearest cell of the other kind (land ↔ water); 0 = coast. */
+export function computeCoastDistance(
+  grid: Pick<GeodesicGrid, 'cellCount' | 'neighborOffsets' | 'neighbors'>,
+  heightM: Float32Array,
+  out: Uint16Array = new Uint16Array(grid.cellCount),
+): Uint16Array {
+  const { cellCount, neighborOffsets, neighbors } = grid;
+  out.fill(0xffff);
+  const queue = new Uint32Array(cellCount);
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < cellCount; i++) {
+    const land = heightM[i] >= 0;
+    for (let k = neighborOffsets[i]; k < neighborOffsets[i + 1]; k++) {
+      if (heightM[neighbors[k]] >= 0 !== land) {
+        out[i] = 0;
+        queue[tail++] = i;
+        break;
+      }
+    }
+  }
+  while (head < tail) {
+    const i = queue[head++];
+    const land = heightM[i] >= 0;
+    for (let k = neighborOffsets[i]; k < neighborOffsets[i + 1]; k++) {
+      const n = neighbors[k];
+      if (out[n] === 0xffff && heightM[n] >= 0 === land) {
+        out[n] = out[i] + 1;
+        queue[tail++] = n;
+      }
+    }
+  }
+  for (let i = 0; i < cellCount; i++) if (out[i] === 0xffff) out[i] = 999;
+  return out;
+}
+
+/** Inland regions swing more between summer and winter than coasts and the sea. */
+export function seasonAmplitudeFor(latitude: number, land: boolean, coastDistance: number): number {
+  const continentality = land ? Math.min(1, coastDistance / 12) : 0;
+  return Math.abs(Math.sin(latitude)) * (land ? 8 + 9 * continentality : 6);
+}
+
+/** Temperature change from a height change on land (6.5 °C per km). */
+export function lapseRate(heightM: number): number {
+  return heightM > 0 ? (heightM / 1000) * 6.5 : 0;
+}
+
 export function generatePlanet(seed: number, size: PlanetSize): PlanetData {
   const preset = PLANET_PRESETS[size];
   const grid = buildGeodesicGrid(preset.frequency);
-  const { positions, cellCount, neighborOffsets, neighbors } = grid;
+  const { positions, cellCount } = grid;
   const rng = new Rng(seed).fork('planet');
 
   const nWarp = createNoise3D(rng.fork('warp').fn);
@@ -149,33 +196,8 @@ export function generatePlanet(seed: number, size: PlanetSize): PlanetData {
     }
   }
 
-  // 3. Distance to the coast (multi-source breadth-first search over neighbors).
-  const coastDistance = new Uint16Array(cellCount).fill(0xffff);
-  const queue = new Uint32Array(cellCount);
-  let head = 0;
-  let tail = 0;
-  for (let i = 0; i < cellCount; i++) {
-    const land = heightM[i] >= 0;
-    for (let k = neighborOffsets[i]; k < neighborOffsets[i + 1]; k++) {
-      if (heightM[neighbors[k]] >= 0 !== land) {
-        coastDistance[i] = 0;
-        queue[tail++] = i;
-        break;
-      }
-    }
-  }
-  while (head < tail) {
-    const i = queue[head++];
-    const land = heightM[i] >= 0;
-    for (let k = neighborOffsets[i]; k < neighborOffsets[i + 1]; k++) {
-      const n = neighbors[k];
-      if (coastDistance[n] === 0xffff && heightM[n] >= 0 === land) {
-        coastDistance[n] = coastDistance[i] + 1;
-        queue[tail++] = n;
-      }
-    }
-  }
-  for (let i = 0; i < cellCount; i++) if (coastDistance[i] === 0xffff) coastDistance[i] = 999;
+  // 3. Distance to the coast.
+  const coastDistance = computeCoastDistance(grid, heightM);
 
   // 4. Climate and biomes.
   const temperature = new Float32Array(cellCount);
@@ -195,12 +217,9 @@ export function generatePlanet(seed: number, size: PlanetSize): PlanetData {
     const z = pz * scale;
 
     const tNoise = fbm(nClimate, x * 1.6, y * 1.6, z * 1.6, 3) * 3;
-    const lapse = land ? (heightM[i] / 1000) * 6.5 : 0;
-    temperature[i] = baseTemperature(lat) - lapse + tNoise;
+    temperature[i] = baseTemperature(lat) - lapseRate(heightM[i]) + tNoise;
 
-    // Inland regions swing more between summer and winter than coasts.
-    const continentality = land ? Math.min(1, coastDistance[i] / 12) : 0;
-    seasonAmplitude[i] = Math.abs(Math.sin(lat)) * (land ? 8 + 9 * continentality : 6);
+    seasonAmplitude[i] = seasonAmplitudeFor(lat, land, coastDistance[i]);
 
     // Rain belts: wet at the equator and around 60°, dry around 30° and at the poles.
     const latDeg = (Math.abs(lat) * 180) / Math.PI;

@@ -206,6 +206,7 @@ export function Menu({ ui, onClose, onCreate, onLang }: Props) {
                 <li>{t('controls.keys.move')}</li>
                 <li>{t('controls.keys.turn')}</li>
                 <li>{t('controls.keys.pause')}</li>
+                <li>{t('controls.keys.cancel')}</li>
               </ul>
             </div>
           </div>

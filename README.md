@@ -8,27 +8,39 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 1 – Erster Planet ✅
+## Stand: Meilenstein 2 – Zorn & Natur ✅
 
-- **Zufälliger 3D-Planet** aus einem Welt-Code:
-  - Kontinente, Inseln, Gebirge, Flachwasser und Tiefsee
-  - 14 Landschaften, von Regenwald bis ewigem Eis
-  - drei Größen
-- **Echte Sonne:**
-  - Eine Hälfte des Planeten ist Tag, die andere Nacht.
-  - Die schräge Achse sorgt für Jahreszeiten.
-- **Jahreszeiten:**
-  - Im Winter kommen Schnee und Packeis.
-  - Laubwälder werden im Herbst orange.
-- **Gott-Kamera** für Maus, Touch und Tastatur: vom Weltall bis zu den Baumwipfeln.
-  Nah am Boden wird der Himmel blau.
-- **Zeit:** Pause, 1×, 10×, 100×, 1000×. Ab 100× gilt Zeitraffer mit gemitteltem Sonnenlicht.
-- **Orte ansehen:** Klick oder Tippen zeigt Landschaft, Höhe, Temperatur, Klimazone und Ortszeit.
-- **Welt-Code** zum Teilen, z.B. `ENIS-36YQ-0JVM`. Der Code steht auch im Link (`#ENIS-…`).
-- **Sprache:** Deutsch und Englisch.
-- Der Spielstand wird im Browser gemerkt.
+**Neu: 14 Naturkräfte.** Du findest sie links unter „Natur“:
 
-Die Götterkräfte sind schon zu sehen, aber noch gesperrt. Sie kommen ab Meilenstein 2.
+| Gruppe | Kräfte |
+|---|---|
+| Wetter | Blitz, Regen, Dürre, Feuer, Supersturm |
+| Erde | Erdbeben, Vulkan, Flutwelle, Meteorit |
+| Landschaft | Land heben, Land senken, Wald pflanzen (mit dem Finger oder der Maus malen) |
+| Klima | Eiszeit, Hitzezeit (für den ganzen Planeten, über Jahrhunderte) |
+
+- **Echte Folgen:**
+  - Feuer breitet sich durch trockene Wälder aus, und Regen löscht es.
+  - Lava fließt bergab, kühlt zu Gestein ab und setzt Wälder in Brand.
+  - Flutwellen erreichen die Küsten zeitversetzt.
+  - Meteoriten graben Krater, und ein Vulkan im Meer lässt eine neue Insel entstehen.
+  - Verbrannte Wälder wachsen über Jahrzehnte nach.
+  - Vulkanausbrüche und Einschläge verdunkeln den Himmel und kühlen den Planeten ab: Es gibt einen vulkanischen Winter oder einen Einschlagswinter.
+- **Spektakuläre Effekte:**
+  - Blitze, Meteor-Einschlag mit Druckwelle, Lava-Fontänen und Aschesäulen
+  - Wirbelsturm-Spirale, Regenwolken, Flutwelle und Flammen
+  - Kamerawackeln
+- **Geräusche:** Donner, Grollen, Explosion, Welle, Wind, Regen und Feuerknistern. Alles ist im Code erzeugt, ohne Audiodateien, und lässt sich ausschalten.
+- **Zurückspulen (⏪):** vor jede eingesetzte Kraft oder an den Beginn jedes 10. Jahres.
+- Bei großen Katastrophen springt die Zeit auf 1×, damit du zusehen kannst.
+- Die Orts-Infos zeigen jetzt auch Zustände wie „brennt“, „Lava“, „überflutet“ oder „Asche“.
+
+### Meilenstein 1 – Erster Planet ✅
+
+- Zufälliger 3D-Planet aus einem Welt-Code, mit 14 Landschaften und drei Größen
+- Echte Sonne mit Tag und Nacht und Jahreszeiten, mit Schnee, Packeis und Herbstlaub
+- Gott-Kamera für Maus, Touch und Tastatur; Zeit von Pause bis 1000×
+- Orte ansehen, Welt-Code teilen, Deutsch und Englisch, Spielstand im Browser
 
 ## Entwickeln
 
@@ -41,6 +53,14 @@ npm run build           # Build nach dist/
 npm run build:artifact  # alles in einer HTML-Datei (zum Teilen als Link)
 ```
 
+## Wie das Zurückspulen funktioniert
+
+Die Welt ist immer **Startplanet + Liste der eingesetzten Kräfte**. Jede Kraft
+wird mit Zeitpunkt, Ort und Zufallszahl gespeichert. Zurückspulen heißt: den
+Startplaneten neu laden und nur die Kräfte vor dem gewählten Zeitpunkt noch
+einmal anwenden. Das ist exakt reproduzierbar, die Tests prüfen es. Der
+Spielstand ist deshalb sehr klein.
+
 ## Aufbau
 
 ```
@@ -49,7 +69,11 @@ src/
   sim/         Spiel-Logik ohne Grafik (später im Web Worker)
     clock.ts   Kalender, Geschwindigkeiten, Sonnenstand
     planet/    geodätisches Netz, Gelände, Klima, Landschaften
+    world.ts   Welt-Gedächtnis: Ereignisse, Narben (Feuer, Lava, Flut …), Klima
+    powers.ts  die Götterkräfte
   render/      Three.js: Boden, Meer, Atmosphäre, Himmel, Bäume, Wolken, Kamera
+    fx/        Partikel und Effekte der Götterkräfte
+  audio/       Geräusche (Web Audio, im Code erzeugt)
   game/        Game: verbindet Simulation, Grafik und Oberfläche
   ui/          Oberfläche mit Preact
   i18n/        Texte auf Deutsch und Englisch

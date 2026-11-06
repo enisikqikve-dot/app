@@ -47,8 +47,17 @@ export interface SeasonUniforms {
   uSeason: { value: number };
   /** −1 … 1, the season signal shifted a quarter year: +1 spring, −1 autumn (north). */
   uSeasonCos: { value: number };
+  /** °C added everywhere by ice ages, volcanic winters and heat ages. */
+  uGlobalTemp: { value: number };
+  /** Real seconds, for flickering fire and lava. */
+  uTime: { value: number };
 }
 
 export function createSeasonUniforms(): SeasonUniforms {
-  return { uSeason: { value: 0 }, uSeasonCos: { value: 1 } };
+  return { uSeason: { value: 0 }, uSeasonCos: { value: 1 }, uGlobalTemp: { value: 0 }, uTime: { value: 0 } };
+}
+
+/** Converts kilometers on the planet to scene units. */
+export function kmToUnits(km: number, radiusKm: number): number {
+  return (km / radiusKm) * R;
 }

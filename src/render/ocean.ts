@@ -17,11 +17,13 @@ export function buildOcean(season: SeasonUniforms, detail: number): THREE.Mesh {
   });
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSeason = season.uSeason;
+    shader.uniforms.uGlobalTemp = season.uGlobalTemp;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
         uniform float uSeason;
+        uniform float uGlobalTemp;
         flat varying float vIce;
         ${GLSL_NOISE}`,
       )
@@ -34,7 +36,7 @@ export function buildOcean(season: SeasonUniforms, detail: number): THREE.Mesh {
           float cosLat = sqrt(max(0.0, 1.0 - sinLat * sinLat));
           float meanT = -22.0 + 50.0 * pow(cosLat, 1.3);
           float hemi = clamp(sinLat * 8.0, -1.0, 1.0);
-          float tNow = meanT + 6.0 * abs(sinLat) * hemi * uSeason;
+          float tNow = meanT + 6.0 * abs(sinLat) * hemi * uSeason + uGlobalTemp;
           tNow += (enisNoise(dir * 9.0) - 0.5) * 7.0;
           vIce = smoothstep(-2.0, -4.5, tNow);
         }`,

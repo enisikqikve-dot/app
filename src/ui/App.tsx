@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Game } from '../game/Game';
 import { safeStorage } from '../core/store';
-import { setLang, t, type Lang } from '../i18n';
+import { setLang, t, type Lang, type MessageKey } from '../i18n';
+import { powerDef, type PowerKind } from '../sim/powers';
 import { useStore } from './useStore';
 import { TopBar } from './TopBar';
 import { PowersRail } from './PowersRail';
+import { PowerPalette, POWER_ICONS } from './PowerPalette';
+import { RewindPanel } from './RewindPanel';
 import { PlacePanel } from './PlacePanel';
 import { Menu } from './Menu';
 import { IconMinus, IconPlus } from './icons';
@@ -15,15 +18,17 @@ export function App({ game }: { game: Game }) {
   const ui = useStore(game.ui);
   const [, setLangTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [rewindOpen, setRewindOpen] = useState(false);
   const [welcome, setWelcome] = useState(() => safeStorage.get(WELCOME_KEY) !== '1');
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
   const toastTimer = useRef<number>(0);
   const wasTimelapse = useRef(ui.timelapse);
 
-  const showToast = (text: string) => {
+  const showToast = (text: string, ms = 3600) => {
     window.clearTimeout(toastTimer.current);
     setToast({ text, id: Date.now() });
-    toastTimer.current = window.setTimeout(() => setToast(null), 3600);
+    toastTimer.current = window.setTimeout(() => setToast(null), ms);
   };
 
   // Explain the steady light once timelapse starts.
@@ -31,6 +36,11 @@ export function App({ game }: { game: Game }) {
     if (ui.timelapse && !wasTimelapse.current && ui.ready) showToast(t('hint.timelapse'));
     wasTimelapse.current = ui.timelapse;
   }, [ui.timelapse]);
+
+  // Messages from the game (ice age started, rewound …).
+  useEffect(() => {
+    if (ui.notice) showToast(t(ui.notice.key), 5200);
+  }, [ui.notice?.id]);
 
   // Keep the world code in the link so it can be shared.
   useEffect(() => {
@@ -44,11 +54,14 @@ export function App({ game }: { game: Game }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !menuOpen) game.clearSelection();
+      if (e.key !== 'Escape' || menuOpen || rewindOpen) return;
+      if (ui.armed) game.arm(null);
+      else if (paletteOpen) setPaletteOpen(false);
+      else game.clearSelection();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen]);
+  }, [menuOpen, rewindOpen, paletteOpen, ui.armed]);
 
   const dismissWelcome = () => {
     setWelcome(false);
@@ -60,13 +73,66 @@ export function App({ game }: { game: Game }) {
     setLangTick((n) => n + 1);
   };
 
+  const pickPower = (kind: PowerKind) => {
+    dismissWelcome();
+    if (ui.armed === kind) {
+      game.arm(null);
+      return;
+    }
+    game.clearSelection();
+    game.arm(kind);
+    // On small screens the palette would cover the planet while aiming.
+    if (powerDef(kind).target !== 'global' && window.innerWidth < 640) setPaletteOpen(false);
+  };
+
+  const ArmedIcon = ui.armed ? POWER_ICONS[ui.armed] : null;
+
   return (
     <div class="hud">
       {ui.ready && (
         <>
-          <TopBar ui={ui} onSpeed={(i) => game.setSpeed(i)} onMenu={() => setMenuOpen(true)} />
-          <PowersRail onLocked={showToast} />
-          {ui.place && <PlacePanel place={ui.place} onClose={() => game.clearSelection()} />}
+          <TopBar
+            ui={ui}
+            rewindOpen={rewindOpen}
+            onSpeed={(i) => game.setSpeed(i)}
+            onMenu={() => setMenuOpen(true)}
+            onRewind={() => setRewindOpen((open) => !open)}
+            onSound={() => game.setSound(!ui.soundOn)}
+          />
+          <PowersRail
+            natureOpen={paletteOpen}
+            onNature={() => {
+              dismissWelcome();
+              setPaletteOpen((open) => !open);
+            }}
+            onLocked={(text) => showToast(text)}
+          />
+          {paletteOpen && <PowerPalette armed={ui.armed} onPick={pickPower} />}
+          {ui.place && !ui.armed && !rewindOpen && <PlacePanel place={ui.place} onClose={() => game.clearSelection()} />}
+          {rewindOpen && (
+            <RewindPanel
+              points={game.rewindPoints()}
+              onClose={() => setRewindOpen(false)}
+              onPick={(p) => {
+                setRewindOpen(false);
+                game.rewindTo(p);
+              }}
+            />
+          )}
+          {ui.armed && ArmedIcon && (
+            <div class="armed glass-strong" role="status">
+              <span class="armed-icon">
+                <ArmedIcon size={20} />
+              </span>
+              <span class="armed-text">
+                <b>{t(`power.${ui.armed}` as MessageKey)}</b>
+                <span>{powerDef(ui.armed).target === 'brush' ? t('armed.brush') : t('armed.point')}</span>
+              </span>
+              <button type="button" class="btn" onClick={() => game.arm(null)}>
+                {t('armed.cancel')}
+              </button>
+            </div>
+          )}
           <div class="zoom glass" role="group">
             <button type="button" class="icon-btn" aria-label="Zoom +" onClick={() => game.zoomBy(0.6)}>
               <IconPlus size={18} />
@@ -75,7 +141,7 @@ export function App({ game }: { game: Game }) {
               <IconMinus size={18} />
             </button>
           </div>
-          {welcome && !ui.place && (
+          {welcome && !ui.place && !paletteOpen && !ui.armed && (
             <section class="welcome glass" aria-labelledby="welcome-title">
               <h2 id="welcome-title">{t('welcome.title')}</h2>
               <p>{t('welcome.text', { name: ui.planetName })}</p>
@@ -115,3 +181,4 @@ export function App({ game }: { game: Game }) {
     </div>
   );
 }
+

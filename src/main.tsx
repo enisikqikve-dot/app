@@ -52,15 +52,17 @@ function start(hotData: unknown): void {
   const restoredSpec = restored ? decodeWorldCode(restored.code) : null;
   let spec: WorldSpec;
   let minutes: number | undefined;
+  let events: SaveData['events'] = [];
   if (fromHash && (!restoredSpec || restoredSpec.seed !== fromHash.seed || restoredSpec.size !== fromHash.size)) {
     spec = fromHash;
   } else if (restoredSpec && restored) {
     spec = restoredSpec;
     minutes = restored.minutes;
+    events = restored.events ?? [];
   } else {
     spec = { seed: randomSeed(), size: 'medium' };
   }
-  void game.createWorld(spec, minutes, restored?.speedIndex === 0 ? 1 : restored?.speedIndex);
+  void game.createWorld(spec, minutes, restored?.speedIndex === 0 ? 1 : restored?.speedIndex, events);
 }
 
 if (hot?.ready) hot.ready(start);

@@ -36,6 +36,10 @@ export interface GodCameraOptions {
   onTap: (clientX: number, clientY: number) => void;
   /** Called when the user starts interacting (e.g. to hide hints). */
   onInteract?: () => void;
+  /** Brush tools: drag with the primary pointer paints instead of turning the planet. */
+  onBrush?: (phase: 'start' | 'move' | 'end', clientX: number, clientY: number) => void;
+  /** Mouse moves without buttons (for a brush preview). */
+  onHover?: (clientX: number, clientY: number) => void;
 }
 
 export class GodCamera {
@@ -45,8 +49,14 @@ export class GodCamera {
   distance = R * 2.6;
   targetDistance = R * 2.6;
   tiltOffset = 0;
+  /** While true, a one-pointer drag goes to `onBrush` instead of panning. */
+  brushMode = false;
 
   private readonly dom: HTMLElement;
+  private brushing = false;
+  private shakeStrength = 0;
+  private shakeTime = 0;
+  private shakeTotal = 0;
   private readonly opts: GodCameraOptions;
   private readonly pointers = new Map<number, PointerInfo>();
   private readonly keys = new Set<string>();
@@ -117,6 +127,14 @@ export class GodCamera {
     this.reorthogonalize();
   }
 
+  /** Shakes the camera, e.g. for earthquakes and impacts. */
+  shake(strength: number, seconds: number): void {
+    if (strength >= this.shakeStrength * (this.shakeTime / Math.max(0.001, this.shakeTotal))) {
+      this.shakeStrength = strength;
+      this.shakeTime = this.shakeTotal = seconds;
+    }
+  }
+
   zoom(factor: number): void {
     this.targetDistance = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, this.targetDistance * factor));
   }
@@ -141,6 +159,8 @@ export class GodCamera {
       this.inertia.multiplyScalar(Math.exp(-dt * 5));
     }
 
+    this.shakeTime = Math.max(0, this.shakeTime - dt);
+
     // Smooth zoom and ground height
     this.distance += (this.targetDistance - this.distance) * (1 - Math.exp(-dt * 9));
     const wantSurface = this.opts.surfaceRadius(this.focus);
@@ -164,6 +184,12 @@ export class GodCamera {
 
     this.camera.up.copy(this.focus).multiplyScalar(Math.sin(tilt)).addScaledVector(this.forward, Math.cos(tilt));
     this.camera.lookAt(target);
+    if (this.shakeTime > 0) {
+      const k = this.shakeStrength * (this.shakeTime / this.shakeTotal) * (0.08 + this.distance * 0.006);
+      this.camera.position.x += (Math.random() - 0.5) * k;
+      this.camera.position.y += (Math.random() - 0.5) * k;
+      this.camera.position.z += (Math.random() - 0.5) * k;
+    }
     this.camera.near = Math.max(0.02, this.distance * 0.012);
     this.camera.far = pos.length() + 2600;
     this.camera.updateProjectionMatrix();
@@ -198,14 +224,32 @@ export class GodCamera {
         button: e.button,
         type: e.pointerType,
       });
-      if (this.pointers.size > 1) this.gestureWasMulti = true;
+      if (this.pointers.size > 1) {
+        this.gestureWasMulti = true;
+        if (this.brushing) {
+          this.brushing = false;
+          this.opts.onBrush?.('end', e.clientX, e.clientY);
+        }
+      } else if (this.brushMode && e.button === 0 && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        this.brushing = true;
+        this.opts.onBrush?.('start', e.clientX, e.clientY);
+      }
       this.inertia.set(0, 0);
       this.opts.onInteract?.();
     });
 
     on(el, 'pointermove', (e) => {
       const p = this.pointers.get(e.pointerId);
-      if (!p) return;
+      if (!p) {
+        if (e.pointerType === 'mouse') this.opts.onHover?.(e.clientX, e.clientY);
+        return;
+      }
+      if (this.brushing && this.pointers.size === 1) {
+        p.x = e.clientX;
+        p.y = e.clientY;
+        this.opts.onBrush?.('move', e.clientX, e.clientY);
+        return;
+      }
       const now = performance.now();
       if (this.pointers.size === 1) {
         const dx = e.clientX - p.x;
@@ -242,6 +286,12 @@ export class GodCamera {
       const p = this.pointers.get(e.pointerId);
       if (!p) return;
       this.pointers.delete(e.pointerId);
+      if (this.brushing) {
+        this.brushing = false;
+        this.opts.onBrush?.('end', e.clientX, e.clientY);
+        if (this.pointers.size === 0) this.gestureWasMulti = false;
+        return;
+      }
       const moved = Math.hypot(e.clientX - p.startX, e.clientY - p.startY);
       const quick = performance.now() - p.startTime < TAP_MAX_MS;
       if (!this.gestureWasMulti && moved < TAP_SLOP_PX && quick && p.button === 0 && e.type === 'pointerup') {
