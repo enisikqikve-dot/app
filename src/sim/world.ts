@@ -21,6 +21,7 @@ import {
   type PlanetData,
 } from './planet/generate';
 import { Biome, classifyBiome, isWater } from './planet/biomes';
+import { computeRivers } from './planet/rivers';
 import { MINUTES_PER_DAY, MINUTES_PER_YEAR } from './clock';
 import type { PowerEvent, PowerKind } from './powers';
 
@@ -28,7 +29,7 @@ const HOUR = 60;
 const DAY = MINUTES_PER_DAY;
 const YEAR = MINUTES_PER_YEAR;
 
-export type ScarKind = 'burn' | 'lava' | 'flood' | 'storm' | 'drought' | 'rain' | 'ash' | 'impact' | 'quake' | 'eruption';
+export type ScarKind = 'burn' | 'lava' | 'flood' | 'storm' | 'drought' | 'rain' | 'ash' | 'impact' | 'quake' | 'eruption' | 'bounty' | 'plague';
 
 export interface Scar {
   id: number;
@@ -90,6 +91,12 @@ export interface CellState {
   veg: number;
   burnt: boolean;
   lavaRock: boolean;
+  /** Wind of a passing storm, 0 … 1. */
+  storm: number;
+  /** A blessed harvest, 0 … 1 (more food). */
+  bounty: number;
+  /** Inside a plague zone. */
+  plague: boolean;
 }
 
 /** Per-cell effect channels for rendering, refreshed a few times per second. */
@@ -270,6 +277,7 @@ export class World {
     for (let i = 0; i < p.cellCount; i++) {
       p.seasonAmplitude[i] = seasonAmplitudeFor(latitudeOf(p.positions[i * 3 + 1]), p.heightM[i] >= 0, p.coastDistance[i]);
     }
+    computeRivers(p, p.heightM, p.moisture, p);
     this.planted.fill(0);
     this.events = [];
     this.scars = [];
@@ -328,6 +336,31 @@ export class World {
       case 'lower':
       case 'forest':
         for (const cell of event.stamps ?? [event.cell]) this.brushStamp(event.kind, cell);
+        break;
+      case 'harvest': {
+        const radius = 400;
+        const { cells, dist } = this.cellsWithin(event.cell, radius);
+        this.addScar(event.id, 'bounty', event.minutes, cells, cells.map(() => 0), dist.map((d) => 1 - (d / radius) * 0.4), {
+          active: 14 * DAY,
+          tint: 10 * DAY,
+          center: event.cell,
+          radiusKm: radius,
+        });
+        this.extinguish(cells, event.minutes, ['drought']);
+        break;
+      }
+      case 'plague': {
+        const radius = 450;
+        const { cells, dist } = this.cellsWithin(event.cell, radius);
+        this.addScar(event.id, 'plague', event.minutes, cells, cells.map(() => 0), dist.map((d) => 1 - d / radius), {
+          active: 12 * DAY,
+          center: event.cell,
+          radiusKm: radius,
+        });
+        break;
+      }
+      default:
+        // Powers over the living (heal, create people …) leave no mark on the land.
         break;
     }
     this.events.push(event);
@@ -389,6 +422,9 @@ export class World {
       veg: 1,
       burnt: false,
       lavaRock: false,
+      storm: 0,
+      bounty: 0,
+      plague: false,
     };
     for (const scar of this.scars) {
       const i = scar.index.get(cell);
@@ -537,7 +573,10 @@ export class World {
       case 'storm': {
         const wet = age < scar.active ? 0.6 * s : 0.6 * s * (1 - smooth((age - scar.active) / scar.tint));
         out.wet = Math.max(out.wet, wet);
-        if (age < scar.active) out.raining = true;
+        if (age < scar.active) {
+          out.raining = true;
+          out.storm = Math.max(out.storm, s);
+        }
         out.veg *= 1 - scar.damage * s * (1 - regrow(Math.max(0, age - scar.active)));
         return;
       }
@@ -570,6 +609,15 @@ export class World {
         return;
       }
       case 'eruption':
+        return;
+      case 'bounty': {
+        const b = s * Math.min(1, age / (0.3 * DAY)) * (1 - smooth((age - scar.active) / scar.tint));
+        out.bounty = Math.max(out.bounty, b);
+        out.green = Math.max(out.green, b * 0.9);
+        return;
+      }
+      case 'plague':
+        if (age < scar.active) out.plague = true;
         return;
     }
   }
@@ -713,6 +761,9 @@ export class World {
       p.biome[i] = this.classify(i);
       if (p.biome[i] !== oldBiome[i]) this.changedCells.add(i);
     }
+    const oldFresh = p.fresh.slice();
+    computeRivers(p, p.heightM, p.moisture, p);
+    for (let i = 0; i < p.cellCount; i++) if (p.fresh[i] !== oldFresh[i]) this.changedCells.add(i);
     this.terrainVersion++;
   }
 
@@ -1066,6 +1117,9 @@ const BLANK: CellState = {
   veg: 1,
   burnt: false,
   lavaRock: false,
+  storm: 0,
+  bounty: 0,
+  plague: false,
 };
 
 /** Which forest grows where the player plants one. */

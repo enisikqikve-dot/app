@@ -66,6 +66,7 @@ canvas.world:active {
 .hud {
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
 }
 .hud > *,
@@ -710,9 +711,11 @@ input:focus-visible {
     gap: 10px;
     padding: 8px 12px;
   }
-  .topbar-world .divider,
-  .topbar-world .epoch {
+  .topbar-world .divider {
     display: none;
+  }
+  .topbar-world .epoch {
+    margin-left: 0;
   }
   .wordmark {
     font-size: 21px;
@@ -773,6 +776,10 @@ input:focus-visible {
     bottom: calc(var(--edge-bottom) + 92px);
     max-height: 52vh;
     overflow-y: auto;
+  }
+  .place.person-panel,
+  .place.herd-panel {
+    max-height: 46vh;
   }
   .place-title {
     font-size: 26px;
@@ -1069,4 +1076,133 @@ input:focus-visible {
 .loading-orb.is-broken {
   animation: none;
   filter: grayscale(0.8) brightness(0.7);
+}
+
+/* ---------------------------------------------------------------- milestone 3: life */
+
+.bubbles {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.bubble {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(250, 250, 246, 0.92);
+  color: #1b1d22;
+  font-size: 15px;
+  line-height: 1.3;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  will-change: transform;
+}
+.bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+}
+.bubble.is-label {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 13px;
+}
+.bubble.is-selected {
+  background: var(--sun);
+  color: var(--sun-ink);
+}
+
+.person-panel .activity {
+  color: var(--ink);
+}
+.chip-dead {
+  color: var(--ink-3);
+}
+.needs {
+  display: grid;
+  gap: 7px;
+}
+.need {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.need-label {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.need-bar {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.need-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #8fcf7a;
+  transition: width 0.3s;
+}
+.need-fill.is-low {
+  background: #ff9a6a;
+}
+.lifelog h3 {
+  margin: 4px 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.lifelog ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.lifelog li {
+  display: grid;
+  gap: 1px;
+  line-height: 1.35;
+}
+.lifelog li .mono {
+  font-size: 11px;
+}
+.person-panel .btn {
+  align-self: flex-start;
+}
+
+.armed-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.option {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.option.is-active {
+  background: var(--sun);
+  border-color: var(--sun);
+  color: var(--sun-ink);
+  font-weight: 600;
 }

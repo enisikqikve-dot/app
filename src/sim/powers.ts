@@ -14,10 +14,23 @@ export type PowerKind =
   | 'heatAge'
   | 'raise'
   | 'lower'
-  | 'forest';
+  | 'forest'
+  | 'harvest'
+  | 'heal'
+  | 'revive'
+  | 'createPeople'
+  | 'spawnAnimals'
+  | 'smite'
+  | 'plague'
+  | 'move';
 
-/** point: tap a place · brush: drag over the land · global: affects the whole planet at once. */
-export type PowerTarget = 'point' | 'brush' | 'global';
+/**
+ * point: tap a place · brush: drag over the land · global: the whole planet at once ·
+ * person: tap a living person · dead: tap someone who died recently · carry: tap a person, then a place.
+ */
+export type PowerTarget = 'point' | 'brush' | 'global' | 'person' | 'dead' | 'carry';
+
+export type PowerCategory = 'nature' | 'blessing' | 'life';
 
 export interface PowerDef {
   kind: PowerKind;
@@ -26,6 +39,7 @@ export interface PowerDef {
   catastrophe: boolean;
   /** Size of the aiming ring, in km. */
   aimKm: number;
+  category?: PowerCategory;
 }
 
 export const NATURE_POWERS: readonly PowerDef[] = [
@@ -45,9 +59,35 @@ export const NATURE_POWERS: readonly PowerDef[] = [
   { kind: 'forest', target: 'brush', catastrophe: false, aimKm: 125 },
 ];
 
+export const BLESSING_POWERS: readonly PowerDef[] = [
+  { kind: 'harvest', target: 'point', catastrophe: false, aimKm: 400, category: 'blessing' },
+  { kind: 'heal', target: 'point', catastrophe: false, aimKm: 170, category: 'blessing' },
+  { kind: 'revive', target: 'dead', catastrophe: false, aimKm: 0, category: 'blessing' },
+];
+
+export const LIFE_POWERS: readonly PowerDef[] = [
+  { kind: 'createPeople', target: 'point', catastrophe: false, aimKm: 30, category: 'life' },
+  { kind: 'spawnAnimals', target: 'point', catastrophe: false, aimKm: 60, category: 'life' },
+  { kind: 'smite', target: 'person', catastrophe: false, aimKm: 0, category: 'life' },
+  { kind: 'plague', target: 'point', catastrophe: false, aimKm: 450, category: 'life' },
+  { kind: 'move', target: 'carry', catastrophe: false, aimKm: 0, category: 'life' },
+];
+
+export const ALL_POWERS: readonly PowerDef[] = [
+  ...NATURE_POWERS.map((p) => ({ ...p, category: 'nature' as const })),
+  ...BLESSING_POWERS,
+  ...LIFE_POWERS,
+];
+
 export function powerDef(kind: PowerKind): PowerDef {
-  return NATURE_POWERS.find((p) => p.kind === kind)!;
+  return ALL_POWERS.find((p) => p.kind === kind)!;
 }
+
+/** Choices some powers offer (how many people, which animal). */
+export const POWER_OPTIONS: Partial<Record<PowerKind, number[]>> = {
+  createPeople: [1, 2, 5],
+  spawnAnimals: [0, 1, 2, 3],
+};
 
 /** One use of a power. The world is the start planet plus all events, in order. */
 export interface PowerEvent {
@@ -61,4 +101,8 @@ export interface PowerEvent {
   seed: number;
   /** Brush powers: the cells of every stamp along the stroke. */
   stamps?: number[];
+  /** The person a power is aimed at (heal, revive, smite, move). */
+  target?: number;
+  /** A chosen option: number of people, or the animal species index. */
+  extra?: number;
 }

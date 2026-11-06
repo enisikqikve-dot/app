@@ -3,23 +3,34 @@ import type { Game } from '../game/Game';
 import { safeStorage } from '../core/store';
 import { randomSeed } from '../core/rng';
 import { setLang, t, type Lang, type MessageKey } from '../i18n';
-import { powerDef, type PowerKind } from '../sim/powers';
+import { POWER_OPTIONS, powerDef, type PowerCategory, type PowerKind } from '../sim/powers';
+import { SPECIES_IDS } from '../sim/life/species';
 import { useStore } from './useStore';
 import { TopBar } from './TopBar';
 import { PowersRail } from './PowersRail';
 import { PowerPalette, POWER_ICONS } from './PowerPalette';
 import { RewindPanel } from './RewindPanel';
 import { PlacePanel } from './PlacePanel';
+import { HerdPanel, PersonPanel } from './LifePanels';
 import { Menu } from './Menu';
 import { IconMinus, IconPlus } from './icons';
 
 const WELCOME_KEY = 'enis.welcomed';
 
+function armedHint(kind: PowerKind, carryStep: 'pick' | 'place' | null): MessageKey {
+  const target = powerDef(kind).target;
+  if (target === 'brush') return 'armed.brush';
+  if (target === 'person') return 'armed.person';
+  if (target === 'dead') return 'armed.dead';
+  if (target === 'carry') return carryStep === 'place' ? 'armed.carryPlace' : 'armed.carryPick';
+  return 'armed.point';
+}
+
 export function App({ game }: { game: Game }) {
   const ui = useStore(game.ui);
   const [, setLangTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [palette, setPalette] = useState<PowerCategory | null>(null);
   const [rewindOpen, setRewindOpen] = useState(false);
   const [welcome, setWelcome] = useState(() => safeStorage.get(WELCOME_KEY) !== '1');
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
@@ -57,12 +68,12 @@ export function App({ game }: { game: Game }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || menuOpen || rewindOpen) return;
       if (ui.armed) game.arm(null);
-      else if (paletteOpen) setPaletteOpen(false);
+      else if (palette) setPalette(null);
       else game.clearSelection();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen, rewindOpen, paletteOpen, ui.armed]);
+  }, [menuOpen, rewindOpen, palette, ui.armed]);
 
   const dismissWelcome = () => {
     setWelcome(false);
@@ -80,13 +91,15 @@ export function App({ game }: { game: Game }) {
       game.arm(null);
       return;
     }
-    game.clearSelection();
+    if (powerDef(kind).target !== 'person' && powerDef(kind).target !== 'dead' && powerDef(kind).target !== 'carry') game.clearSelection();
     game.arm(kind);
     // On small screens the palette would cover the planet while aiming.
-    if (powerDef(kind).target !== 'global' && window.innerWidth < 640) setPaletteOpen(false);
+    if (powerDef(kind).target !== 'global' && window.innerWidth < 640) setPalette(null);
   };
 
   const ArmedIcon = ui.armed ? POWER_ICONS[ui.armed] : null;
+  const options = ui.armed ? POWER_OPTIONS[ui.armed] : undefined;
+  const showPanels = !ui.armed && !rewindOpen;
 
   return (
     <div class="hud">
@@ -101,15 +114,19 @@ export function App({ game }: { game: Game }) {
             onSound={() => game.setSound(!ui.soundOn)}
           />
           <PowersRail
-            natureOpen={paletteOpen}
-            onNature={() => {
+            open={palette}
+            onOpen={(category) => {
               dismissWelcome();
-              setPaletteOpen((open) => !open);
+              setPalette((open) => (open === category ? null : category));
             }}
             onLocked={(text) => showToast(text)}
           />
-          {paletteOpen && <PowerPalette armed={ui.armed} onPick={pickPower} />}
-          {ui.place && !ui.armed && !rewindOpen && <PlacePanel place={ui.place} onClose={() => game.clearSelection()} />}
+          {palette && <PowerPalette category={palette} armed={ui.armed} onPick={pickPower} />}
+          {showPanels && ui.person && (
+            <PersonPanel person={ui.person} following={ui.following} onFollow={(on) => game.follow(on)} onClose={() => game.clearSelection()} />
+          )}
+          {showPanels && ui.herd && <HerdPanel herd={ui.herd} onClose={() => game.clearSelection()} />}
+          {showPanels && ui.place && <PlacePanel place={ui.place} onClose={() => game.clearSelection()} />}
           {rewindOpen && (
             <RewindPanel
               points={game.rewindPoints()}
@@ -127,7 +144,22 @@ export function App({ game }: { game: Game }) {
               </span>
               <span class="armed-text">
                 <b>{t(`power.${ui.armed}` as MessageKey)}</b>
-                <span>{powerDef(ui.armed).target === 'brush' ? t('armed.brush') : t('armed.point')}</span>
+                <span>{t(armedHint(ui.armed, ui.carryStep))}</span>
+                {options && (
+                  <span class="armed-options" role="group" aria-label={t(ui.armed === 'spawnAnimals' ? 'option.which' : 'option.howMany')}>
+                    {options.map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        class={`option${ui.armedOption === value ? ' is-active' : ''}`}
+                        aria-pressed={ui.armedOption === value}
+                        onClick={() => game.setArmedOption(value)}
+                      >
+                        {ui.armed === 'spawnAnimals' ? t(`speciesOne.${SPECIES_IDS[value]}` as MessageKey) : value}
+                      </button>
+                    ))}
+                  </span>
+                )}
               </span>
               <button type="button" class="btn" onClick={() => game.arm(null)}>
                 {t('armed.cancel')}
@@ -142,7 +174,7 @@ export function App({ game }: { game: Game }) {
               <IconMinus size={18} />
             </button>
           </div>
-          {welcome && !ui.place && !paletteOpen && !ui.armed && (
+          {welcome && !ui.place && !ui.person && !ui.herd && !palette && !ui.armed && (
             <section class="welcome glass" aria-labelledby="welcome-title">
               <h2 id="welcome-title">{t('welcome.title')}</h2>
               <p>{t('welcome.text', { name: ui.planetName })}</p>
@@ -193,4 +225,3 @@ export function App({ game }: { game: Game }) {
     </div>
   );
 }
-

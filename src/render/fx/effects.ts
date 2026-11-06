@@ -278,7 +278,9 @@ export class MeteorFx implements Effect {
 }
 
 /** Short bursts made only of particles (eruption start, quake dust, splashes, sparkles). */
-export function burst(ctx: FxContext, kind: 'eruption' | 'dust' | 'splash' | 'sparkle' | 'chill' | 'heat', p: THREE.Vector3, scale = 1): void {
+export type BurstKind = 'eruption' | 'dust' | 'splash' | 'sparkle' | 'chill' | 'heat' | 'gold' | 'heal' | 'plague' | 'spirit';
+
+export function burst(ctx: FxContext, kind: BurstKind, p: THREE.Vector3, scale = 1): void {
   const n = p.clone().normalize();
   const v = new THREE.Vector3();
   if (kind === 'eruption') {
@@ -301,15 +303,38 @@ export function burst(ctx: FxContext, kind: 'eruption' | 'dust' | 'splash' | 'sp
       randomUnit(v).multiplyScalar(0.6).add(n).normalize().multiplyScalar(4 + Math.random() * 8);
       ctx.smoke.spawn({ x: p.x, y: p.y, z: p.z, vx: v.x, vy: v.y, vz: v.z, life: 1.4 + Math.random() * 1.2, size: 0.8, endSize: 2.2, color: WHITE, endColor: new THREE.Color(0xbfd8e4), alpha: 0.9, gravity: 10, drag: 0.5 });
     }
-  } else if (kind === 'sparkle' || kind === 'chill' || kind === 'heat') {
-    const color = kind === 'sparkle' ? new THREE.Color(0x9cff7a) : kind === 'chill' ? new THREE.Color(0xbfe6ff) : new THREE.Color(0xffc070);
+  } else if (kind === 'plague') {
+    for (let i = 0; i < 60 * scale; i++) {
+      randomUnit(v).multiplyScalar(0.9).add(n).normalize().multiplyScalar(0.6 + Math.random() * 1.6);
+      const j = randomUnit().multiplyScalar(Math.random() * 3 * scale);
+      ctx.smoke.spawn({ x: p.x + j.x, y: p.y + j.y, z: p.z + j.z, vx: v.x, vy: v.y, vz: v.z, life: 4 + Math.random() * 4, size: 1.5, endSize: 5, color: new THREE.Color(0x9fb24a), endColor: new THREE.Color(0x4f5a2a), alpha: 0.55, gravity: -0.15, drag: 1.2 });
+    }
+  } else if (kind === 'spirit') {
+    // A column of light: revival, the invisible hand.
+    for (let i = 0; i < 90 * scale; i++) {
+      const j = randomUnit().multiplyScalar(0.25 * scale);
+      v.copy(n).multiplyScalar(2 + Math.random() * 7);
+      ctx.sparks.spawn({ x: p.x + j.x, y: p.y + j.y, z: p.z + j.z, vx: v.x, vy: v.y, vz: v.z, life: 1 + Math.random() * 1.5, size: 0.5, endSize: 0.05, color: WHITE, endColor: new THREE.Color(0xffe2a0), drag: 0.5 });
+    }
+  } else if (kind === 'sparkle' || kind === 'chill' || kind === 'heat' || kind === 'gold' || kind === 'heal') {
+    const color =
+      kind === 'sparkle'
+        ? new THREE.Color(0x9cff7a)
+        : kind === 'chill'
+          ? new THREE.Color(0xbfe6ff)
+          : kind === 'gold'
+            ? new THREE.Color(0xffd36a)
+            : kind === 'heal'
+              ? new THREE.Color(0xf4fff0)
+              : new THREE.Color(0xffc070);
+    const start = color.clone().lerp(WHITE, kind === 'chill' || kind === 'heal' ? 0.6 : 0.3);
     for (let i = 0; i < 50 * scale; i++) {
       const [ta, tb] = tangents(n);
       const r = Math.random() * 4 * scale;
       const a = Math.random() * Math.PI * 2;
       const q = p.clone().addScaledVector(ta, Math.cos(a) * r).addScaledVector(tb, Math.sin(a) * r);
       v.copy(n).multiplyScalar(1 + Math.random() * 2.5);
-      ctx.sparks.spawn({ x: q.x, y: q.y, z: q.z, vx: v.x, vy: v.y, vz: v.z, life: 1.2 + Math.random() * 1.3, size: 0.45, endSize: 0.05, color: WHITE, endColor: color, drag: 0.8 });
+      ctx.sparks.spawn({ x: q.x, y: q.y, z: q.z, vx: v.x, vy: v.y, vz: v.z, life: 1.2 + Math.random() * 1.3, size: 0.24 * Math.sqrt(scale), endSize: 0.04, color: start, endColor: color, drag: 0.8 });
     }
   }
 }

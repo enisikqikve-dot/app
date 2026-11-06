@@ -1,6 +1,12 @@
 /**
- * Game: owns the world, the clock, the renderer and the camera, and runs the
- * frame loop. The UI talks to it only through methods and the `ui` store.
+ * Game: owns the world, the living beings, the clock, the renderer and the
+ * camera, and runs the frame loop. The UI talks to it only through methods
+ * and the `ui` store.
+ *
+ * Time model: the clock runs smoothly; the living world follows in fixed
+ * steps (TICK). Every power is applied at a step boundary, with a snapshot of
+ * the living world taken just before, so rewinding can restore that snapshot
+ * and replay exactly.
  */
 import * as THREE from 'three';
 import { Store, safeStorage } from '../core/store';
@@ -23,16 +29,21 @@ import { currentTemperature, generatePlanet, latitudeOf, longitudeOf, type Plane
 import { nearestCell } from '../sim/planet/geodesic';
 import { Biome, isWater } from '../sim/planet/biomes';
 import { Overlay, World, type ClimateShift } from '../sim/world';
-import { powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
+import { POWER_OPTIONS, powerDef, type PowerEvent, type PowerKind } from '../sim/powers';
+import { Life, REVIVE_WINDOW, TICK } from '../sim/life/life';
+import type { DeathCause, LogKey, Person, Sex, SpeciesId } from '../sim/life/types';
 import { R, MAX_SURFACE, createSeasonUniforms, kmToUnits, radiusForHeight, walkableRadius, type SeasonUniforms } from '../render/scale';
 import { TerrainView } from '../render/terrain';
 import { TreeView } from '../render/trees';
+import { buildRivers } from '../render/rivers';
 import { buildOcean } from '../render/ocean';
 import { buildAtmosphere, type Atmosphere } from '../render/atmosphere';
 import { buildSky, type Sky } from '../render/sky';
 import { buildClouds } from '../render/clouds';
 import { AimRing, PlaceMarker } from '../render/marker';
 import { GodCamera } from '../render/godCamera';
+import { LifeView } from '../render/lifeView';
+import { BubbleLayer, bubbleSymbol, type BubbleItem } from '../render/bubbles';
 import { ParticleSystem } from '../render/fx/particles';
 import {
   burst,
@@ -49,18 +60,34 @@ import {
   type OngoingView,
 } from '../render/fx/effects';
 import { SoundEngine, type SoundName } from '../audio/sound';
-import { parseSaveData, sanitizeEvents, type SaveData } from './saveData';
+import { isLifeData, parseSaveData, sanitizeEvents, type LifeSnapshot, type SaveData } from './saveData';
 
 export type { SaveData };
 
-const SAVE_KEY = 'enis.save.v2';
-const OLD_SAVE_KEY = 'enis.save.v1';
+const SAVE_KEY = 'enis.save.v3';
+const OLD_SAVE_KEYS = ['enis.save.v2', 'enis.save.v1'];
 const SPACE_COLOR = new THREE.Color(0x03050b);
 const DAY_SKY_COLOR = new THREE.Color(0x8db6dc);
 const DUSK_SKY_COLOR = new THREE.Color(0x2b3550);
 const DUST_SKY_COLOR = new THREE.Color(0x857462);
+const DAY = MINUTES_PER_DAY;
+const YEAR = MINUTES_PER_YEAR;
+/** At most this many simulation steps per frame (the clock waits if the simulation falls behind). */
+const MAX_TICKS_PER_FRAME = 900;
 
-export type PlaceCondition = 'burning' | 'burnt' | 'lava' | 'lavaRock' | 'flooded' | 'drought' | 'raining' | 'ash' | 'damaged' | 'planted';
+export type PlaceCondition =
+  | 'burning'
+  | 'burnt'
+  | 'lava'
+  | 'lavaRock'
+  | 'flooded'
+  | 'drought'
+  | 'raining'
+  | 'ash'
+  | 'damaged'
+  | 'planted'
+  | 'blessed'
+  | 'plague';
 
 export interface PlaceInfo {
   cell: number;
@@ -76,6 +103,53 @@ export interface PlaceInfo {
   /** Sea ice right now (water) or snow cover (land). */
   frozen: boolean;
   conditions: PlaceCondition[];
+  /** 0 none, 1 river, 2 lake, 3 spring. */
+  fresh: number;
+  /** Food right now, 0 … ~1.6. */
+  food: number;
+}
+
+export type Activity =
+  | 'idle'
+  | 'rest'
+  | 'sleep'
+  | 'drink'
+  | 'gather'
+  | 'carried'
+  | 'walk.water'
+  | 'walk.food'
+  | 'walk.group'
+  | 'walk.wander'
+  | 'walk.safety'
+  | 'walk.none';
+
+export interface PersonInfo {
+  id: number;
+  name: string;
+  sex: Sex;
+  age: number;
+  alive: boolean;
+  cause: DeathCause | null;
+  revivable: boolean;
+  activity: Activity;
+  food: number;
+  water: number;
+  sleep: number;
+  health: number;
+  sick: boolean;
+  skin: 0 | 1 | 2;
+  hair: number;
+  height: 'short' | 'average' | 'tall';
+  biome: Biome;
+  log: { date: CalendarDate; key: LogKey; cause?: DeathCause }[];
+}
+
+export interface HerdInfo {
+  id: number;
+  species: SpeciesId;
+  count: number;
+  activity: 'grazing' | 'moving' | 'hunting' | 'hungry' | 'roaming';
+  biome: Biome;
 }
 
 export interface ClimateInfo {
@@ -111,7 +185,15 @@ export interface UiState {
   focusHours: number;
   focusDaylight: boolean;
   place: PlaceInfo | null;
+  person: PersonInfo | null;
+  herd: HerdInfo | null;
+  following: boolean;
+  population: number;
   armed: PowerKind | null;
+  /** The chosen option of the armed power (number of people, species). */
+  armedOption: number | null;
+  /** The invisible hand: first pick a person, then a place. */
+  carryStep: 'pick' | 'place' | null;
   climate: ClimateInfo;
   eventCount: number;
   soundOn: boolean;
@@ -127,6 +209,8 @@ interface PlanetScene {
   fxRoot: THREE.Group;
   terrain: TerrainView;
   trees: TreeView;
+  rivers: THREE.Mesh;
+  lifeView: LifeView;
   fire: FireView;
   flood: FloodView;
   clouds: THREE.Group;
@@ -134,6 +218,8 @@ interface PlanetScene {
   atmosphere: Atmosphere;
   fx: FxContext;
 }
+
+type Selection = { kind: 'person' | 'herd'; id: number } | null;
 
 /** The same day, but at 9:30 local time at the given longitude, so a new planet starts in daylight. */
 function morningAt(minutes: number, longitude: number): number {
@@ -159,23 +245,34 @@ export class Game {
   private readonly sparks = new ParticleSystem(5000, true);
   private readonly smoke = new ParticleSystem(3500, false);
   private readonly sound = new SoundEngine();
+  private readonly bubbles: BubbleLayer;
   private world: PlanetScene | null = null;
+  private life: Life | null = null;
+  private snapshots: LifeSnapshot[] = [];
   private spec: WorldSpec | null = null;
   private focusCell = 0;
   private pickCell = 0;
   private selectedCell: number | null = null;
+  /** Seconds left to glide the view onto a fresh selection (phones, where a sheet covers the lower half). */
+  private centering = 0;
+  private selection: Selection = null;
+  private following = false;
   private readonly sunDir = new THREE.Vector3(1, 0.2, 0).normalize();
   private readonly realSunDir = new THREE.Vector3();
   private cloudAngle = 0;
   private lastFrame = performance.now();
   private lastUiPush = 0;
   private lastSave = 0;
+  private lastSnapshotReal = 0;
+  private lastPopulation = 0;
   private running = false;
   private readonly raycaster = new THREE.Raycaster();
   private readonly skyColor = new THREE.Color(SPACE_COLOR);
   private resumeSpeed: SpeedIndex = 1;
 
   private armed: PowerKind | null = null;
+  private armedOption: number | null = null;
+  private carryTarget: number | null = null;
   private effects: Effect[] = [];
   private ongoing = new Map<number, OngoingView>();
   private lastOverlayMinutes = -1;
@@ -195,6 +292,7 @@ export class Game {
     this.scene.background = this.skyColor;
     this.scene.fog = new THREE.Fog(this.skyColor, 1e5, 2e5);
     this.scene.add(this.sunLight, this.sunLight.target, this.ambient, this.marker.group, this.aim.mesh, this.sparks.points, this.smoke.points);
+    this.bubbles = new BubbleLayer(canvas.parentElement ?? document.body);
 
     this.cameraCtl = new GodCamera(canvas, {
       surfaceRadius: (dir) => this.surfaceRadius(dir),
@@ -216,7 +314,13 @@ export class Game {
       focusHours: 12,
       focusDaylight: true,
       place: null,
+      person: null,
+      herd: null,
+      following: false,
+      population: 0,
       armed: null,
+      armedOption: null,
+      carryStep: null,
       climate: { kind: null, temperature: 0, dust: 0 },
       eventCount: 0,
       soundOn: this.sound.enabled,
@@ -247,7 +351,7 @@ export class Game {
   // ---------------------------------------------------------------- saving
 
   static loadSave(): SaveData | null {
-    for (const key of [SAVE_KEY, OLD_SAVE_KEY]) {
+    for (const key of [SAVE_KEY, ...OLD_SAVE_KEYS]) {
       try {
         const raw = safeStorage.get(key);
         if (!raw) continue;
@@ -260,15 +364,44 @@ export class Game {
     return null;
   }
 
+  snapshot(): SaveData | null {
+    if (!this.spec || !this.world || !this.life) return null;
+    return {
+      code: encodeWorldCode(this.spec),
+      minutes: this.clock.minutes,
+      speedIndex: this.clock.speedIndex,
+      events: this.world.world.events,
+      life: this.life.serialize(),
+      snaps: this.persistentSnapshots(),
+    };
+  }
+
+  /** A few snapshots survive a reload: the latest ones and one older one. */
+  private persistentSnapshots(): LifeSnapshot[] {
+    const all = this.snapshots;
+    if (all.length <= 4) return all;
+    return [all[0], ...all.slice(-3)];
+  }
+
+  private save(): void {
+    const data = this.snapshot();
+    if (!data) return;
+    try {
+      safeStorage.set(SAVE_KEY, JSON.stringify(data));
+    } catch {
+      /* storage full or unavailable */
+    }
+  }
+
   /**
    * Starts the game. If a saved world cannot be rebuilt, it falls back to the same planet
    * without the saved events, then to a fresh planet, and finally shows the error.
    */
   async start(spec: WorldSpec, save: SaveData | null): Promise<void> {
     const attempts: (() => Promise<void>)[] = [
-      () => this.createWorld(spec, save?.minutes, save?.speedIndex === 0 ? 1 : save?.speedIndex, save?.events ?? []),
-      () => this.createWorld(spec),
-      () => this.createWorld({ seed: randomSeed(), size: 'medium' }),
+      () => this.createWorld(spec, save),
+      () => this.createWorld(spec, null),
+      () => this.createWorld({ seed: randomSeed(), size: 'medium' }, null),
     ];
     let lastError: unknown = null;
     for (const attempt of attempts) {
@@ -283,27 +416,14 @@ export class Game {
     this.ui.set({ loading: false, error: lastError instanceof Error ? lastError.message : String(lastError) });
   }
 
-  snapshot(): SaveData | null {
-    if (!this.spec || !this.world) return null;
-    return {
-      code: encodeWorldCode(this.spec),
-      minutes: this.clock.minutes,
-      speedIndex: this.clock.speedIndex,
-      events: this.world.world.events,
-    };
-  }
-
-  private save(): void {
-    const data = this.snapshot();
-    if (data) safeStorage.set(SAVE_KEY, JSON.stringify(data));
-  }
-
   // ---------------------------------------------------------------- world lifecycle
 
-  /** Builds a new planet. Runs on the next frames so the loading screen can show. */
-  async createWorld(spec: WorldSpec, startMinutes?: number, speedIndex?: SpeedIndex, events: PowerEvent[] = []): Promise<void> {
-    this.ui.set({ loading: true, place: null, error: null });
+  /** Builds a planet (new, or from a save). Runs on the next frames so the loading screen can show. */
+  async createWorld(spec: WorldSpec, save: SaveData | null): Promise<void> {
+    this.ui.set({ loading: true, place: null, person: null, herd: null, error: null });
     this.selectedCell = null;
+    this.selection = null;
+    this.following = false;
     this.marker.hide();
     this.arm(null);
     // Let the loading screen paint first (a timer, not requestAnimationFrame, which some viewers pause).
@@ -312,12 +432,28 @@ export class Game {
     this.disposeWorld();
     const planet = generatePlanet(spec.seed, spec.size);
     const world = new World(planet);
-    events = sanitizeEvents(events, planet.cellCount);
+    const events = sanitizeEvents(save?.events ?? [], planet.cellCount);
     if (events.length > 0) world.rebuild(events);
     this.nextEventId = events.reduce((m, e) => Math.max(m, e.id), 0) + 1;
     this.spec = spec;
-    this.clock.minutes = startMinutes ?? new Clock().minutes;
-    if (speedIndex !== undefined) this.clock.speedIndex = speedIndex;
+    if (save?.speedIndex !== undefined) this.clock.speedIndex = save.speedIndex === 0 ? 1 : save.speedIndex;
+
+    // The living world: from the save, or new.
+    let life: Life;
+    let minutes: number;
+    if (save?.life && isLifeData(save.life)) {
+      life = Life.restore(save.life);
+      minutes = Math.max(save.minutes, life.t);
+      this.snapshots = (save.snaps ?? []).filter((s) => s.eventCount <= events.length && s.t <= life.t);
+    } else {
+      const home = Life.findHome(world);
+      minutes = save ? save.minutes : morningAt(new Clock().minutes, longitudeOf(planet.positions[home * 3], planet.positions[home * 3 + 2]));
+      life = Life.create(world, minutes);
+      this.snapshots = [];
+    }
+    this.life = life;
+    this.clock.minutes = minutes;
+    this.lastPopulation = life.population();
 
     const root = new THREE.Group();
     const fxRoot = new THREE.Group();
@@ -332,24 +468,28 @@ export class Game {
       kmToUnits: (km) => kmToUnits(km, planet.radiusKm),
     };
     const trees = new TreeView(this.season);
+    const rivers = buildRivers(planet);
+    const lifeView = new LifeView(planet, terrain);
     const ocean = buildOcean(this.season, spec.size === 'large' ? 56 : spec.size === 'medium' ? 40 : 28);
     const fire = new FireView(fx);
     const flood = new FloodView(fxRoot);
     const clouds = buildClouds(planet);
     const atmosphere = buildAtmosphere();
     const sky = buildSky(spec.seed);
-    root.add(terrain.mesh, trees.group, ocean, clouds, atmosphere.mesh, fxRoot);
+    root.add(terrain.mesh, rivers, trees.group, lifeView.group, ocean, clouds, atmosphere.mesh, fxRoot);
     this.scene.add(root, sky.stars, sky.sun, sky.moon);
-    this.world = { world, overlay, root, fxRoot, terrain, trees, fire, flood, clouds, sky, atmosphere, fx };
+    this.world = { world, overlay, root, fxRoot, terrain, trees, rivers, lifeView, fire, flood, clouds, sky, atmosphere, fx };
 
-    this.focusCell = this.pickCell = this.findStartCell(planet);
+    // Look at the people (or the home they would have).
+    const first = life.people.find((p) => p.alive) ?? life.people[0];
+    this.focusCell = this.pickCell = first ? first.cell : Life.findHome(world);
     const start = new THREE.Vector3().fromArray(planet.positions, this.focusCell * 3);
-    if (startMinutes === undefined) this.clock.minutes = morningAt(this.clock.minutes, longitudeOf(start.x, start.z));
-    this.cameraCtl.lookAt(start, R * 1.45);
-    this.cameraCtl.targetDistance = R * 1.45;
+    this.cameraCtl.lookAt(start, R * 0.55);
+    this.cameraCtl.targetDistance = R * 0.55;
     this.realSunDir.copy(this.computeRealSun());
     this.sunDir.copy(this.realSunDir);
     this.refreshEverything();
+    if (this.snapshots.length === 0) this.takeSnapshot(true);
 
     this.ui.set({
       ready: true,
@@ -361,6 +501,7 @@ export class Game {
       speedIndex: this.clock.speedIndex,
       timelapse: this.clock.timelapse,
       eventCount: world.events.length,
+      population: life.population(),
     });
     this.save();
     if (!this.running) {
@@ -370,19 +511,34 @@ export class Game {
     }
   }
 
-  /** Repaints terrain, trees and effects from scratch (after loading or rewinding). */
+  /** Repaints terrain, rivers, trees and effects from scratch (after loading or rewinding). */
   private refreshEverything(): void {
     if (!this.world) return;
-    const { world, overlay, terrain, trees } = this.world;
+    const { world, overlay, terrain, trees, lifeView } = this.world;
     world.computeOverlay(this.clock.minutes, overlay);
     terrain.refreshAll(overlay);
     world.changedCells.clear();
     trees.rebuild(world.planet, terrain.faceBiome, terrain.facePositions, (f) => this.faceVeg(f));
+    this.rebuildRivers();
     this.treeRebuildAt = 0;
     this.applyOverlayViews(true);
     this.lastOverlayMinutes = this.clock.minutes;
     for (const view of this.ongoing.values()) view.dispose();
     this.ongoing.clear();
+    lifeView.reset();
+    this.bubbles.clear();
+  }
+
+  private rebuildRivers(): void {
+    if (!this.world) return;
+    const { root, world } = this.world;
+    const old = this.world.rivers;
+    const rivers = buildRivers(world.planet);
+    root.remove(old);
+    old.geometry.dispose();
+    (old.material as THREE.Material).dispose();
+    root.add(rivers);
+    this.world.rivers = rivers;
   }
 
   // ---------------------------------------------------------------- time
@@ -407,12 +563,24 @@ export class Game {
 
   clearSelection(): void {
     this.selectedCell = null;
+    this.selection = null;
+    this.following = false;
     this.marker.hide();
-    this.ui.set({ place: null });
+    this.ui.set({ place: null, person: null, herd: null, following: false });
   }
 
   zoomBy(factor: number): void {
     this.cameraCtl.zoom(factor);
+  }
+
+  /** The camera keeps the selected person in view until the player moves it. */
+  follow(on: boolean): void {
+    this.following = on && this.selection?.kind === 'person';
+    if (this.following) {
+      this.cameraCtl.targetDistance = Math.min(this.cameraCtl.targetDistance, 11);
+      this.cameraCtl.userPanned = false;
+    }
+    this.ui.set({ following: this.following });
   }
 
   // ---------------------------------------------------------------- powers
@@ -424,14 +592,22 @@ export class Game {
       kind = null;
     }
     this.armed = kind;
+    this.carryTarget = null;
+    const options = kind ? POWER_OPTIONS[kind] : undefined;
+    this.armedOption = options ? options[0] : null;
     this.cameraCtl.brushMode = !!kind && powerDef(kind).target === 'brush';
     if (!kind) this.aim.hide();
     this.canvas.style.cursor = kind ? 'crosshair' : '';
-    this.ui.set({ armed: kind });
+    this.ui.set({ armed: kind, armedOption: this.armedOption, carryStep: kind === 'move' ? 'pick' : null });
+  }
+
+  setArmedOption(value: number): void {
+    this.armedOption = value;
+    this.ui.set({ armedOption: value });
   }
 
   private newEvent(kind: PowerKind, cell: number): PowerEvent {
-    return { id: this.nextEventId++, kind, minutes: this.clock.minutes, cell, seed: randomSeed() };
+    return { id: this.nextEventId++, kind, minutes: this.life?.t ?? this.clock.minutes, cell, seed: randomSeed() };
   }
 
   private notify(key: MessageKey): void {
@@ -444,11 +620,19 @@ export class Game {
     this.sound.play(name, volume);
   }
 
+  /** Applies a power to the land and the living, at the current simulation step. */
+  private commit(event: PowerEvent): void {
+    if (!this.world || !this.life) return;
+    this.takeSnapshot(false);
+    event.minutes = this.life.t;
+    this.world.world.apply(event);
+    this.life.applyEvent(event, this.world.world);
+    this.afterEvent();
+  }
+
   private castGlobal(kind: PowerKind): void {
     if (!this.world) return;
-    const event = this.newEvent(kind, -1);
-    this.world.world.apply(event);
-    this.afterEvent();
+    this.commit(this.newEvent(kind, -1));
     const focusPoint = this.surfacePoint(this.world.world.planet, this.focusCell, new THREE.Vector3());
     burst(this.world.fx, kind === 'iceAge' ? 'chill' : 'heat', focusPoint, 3);
     this.play(kind === 'iceAge' ? 'chill' : 'heat');
@@ -456,8 +640,16 @@ export class Game {
   }
 
   private onTap(clientX: number, clientY: number): void {
-    if (this.armed && powerDef(this.armed).target === 'point') this.castAt(clientX, clientY);
-    else if (!this.armed) this.selectAt(clientX, clientY);
+    if (!this.armed) {
+      const entity = this.pickEntity(clientX, clientY, () => true);
+      if (entity) this.selectEntity(entity.kind, entity.id);
+      else this.selectAt(clientX, clientY);
+      return;
+    }
+    const def = powerDef(this.armed);
+    if (def.target === 'point') this.castAt(clientX, clientY);
+    else if (def.target === 'person' || def.target === 'dead') this.castOnPerson(clientX, clientY, def.target === 'dead');
+    else if (def.target === 'carry') this.carry(clientX, clientY);
   }
 
   private castAt(clientX: number, clientY: number): void {
@@ -471,6 +663,7 @@ export class Game {
       this.notify('notice.slowedDown');
     }
     const event = this.newEvent(kind, hit.cell);
+    if (this.armedOption !== null) event.extra = this.armedOption;
 
     if (kind === 'meteor') {
       this.play('whoosh', hit.point);
@@ -479,17 +672,14 @@ export class Game {
       this.aim.hide();
       this.effects.push(
         new MeteorFx(fx, hit.point, from, cam.position.distanceTo(hit.point), () => {
-          event.minutes = this.clock.minutes;
-          world.apply(event);
-          this.afterEvent();
+          this.commit(event);
           this.play('boom', hit.point);
         }),
       );
       return;
     }
 
-    world.apply(event);
-    this.afterEvent();
+    this.commit(event);
     this.aim.hide();
     const at = this.surfacePoint(world.planet, hit.cell, new THREE.Vector3());
     switch (kind) {
@@ -532,9 +722,85 @@ export class Game {
         this.play('wave', at);
         break;
       }
+      case 'harvest':
+        // The blessing covers a wide land; seen from close by, keep the shower within view.
+        burst(fx, 'gold', at, Math.min(4, Math.max(1.2, this.cameraCtl.distance / 7)));
+        this.play('chime', at);
+        break;
+      case 'heal':
+        burst(fx, 'heal', at, 2.5);
+        this.play('chime', at);
+        break;
+      case 'plague':
+        burst(fx, 'plague', at, 3);
+        this.play('dry', at);
+        break;
+      case 'createPeople':
+        burst(fx, 'spirit', at, 1);
+        this.play('chime', at);
+        break;
+      case 'spawnAnimals':
+        burst(fx, 'sparkle', at, 1);
+        this.play('thud', at);
+        break;
       default:
         break;
     }
+  }
+
+  private castOnPerson(clientX: number, clientY: number, dead: boolean): void {
+    if (!this.world || !this.life || !this.armed) return;
+    const t = this.life.t;
+    const entity = this.pickEntity(clientX, clientY, (e) => {
+      if (e.kind !== 'person') return false;
+      const p = this.life!.person(e.id);
+      if (!p) return false;
+      return dead ? !p.alive && p.died !== undefined && t - p.died <= REVIVE_WINDOW : p.alive;
+    });
+    if (!entity) {
+      this.notify(dead ? 'notice.notRevivable' : 'notice.noPerson');
+      return;
+    }
+    const person = this.life.person(entity.id)!;
+    const event = this.newEvent(this.armed, person.cell);
+    event.target = person.id;
+    const at = entity.pos.clone();
+    this.commit(event);
+    if (this.armed === 'revive') {
+      burst(this.world.fx, 'spirit', at, 2);
+      this.play('chime', at);
+    } else {
+      burst(this.world.fx, 'heal', at, 0.6);
+      this.play('chill', at);
+    }
+    this.selectEntity('person', person.id);
+  }
+
+  private carry(clientX: number, clientY: number): void {
+    if (!this.world || !this.life) return;
+    if (this.carryTarget === null) {
+      const entity = this.pickEntity(clientX, clientY, (e) => e.kind === 'person' && !!this.life!.person(e.id)?.alive);
+      if (!entity) {
+        this.notify('notice.noPerson');
+        return;
+      }
+      this.carryTarget = entity.id;
+      this.selectEntity('person', entity.id);
+      this.ui.set({ carryStep: 'place' });
+      return;
+    }
+    const hit = this.pickAt(clientX, clientY);
+    if (!hit) return;
+    const person = this.life.person(this.carryTarget);
+    const from = person ? this.world.lifeView.shownPosition(person.id)?.clone() : undefined;
+    const event = this.newEvent('move', hit.cell);
+    event.target = this.carryTarget;
+    this.commit(event);
+    if (from) burst(this.world.fx, 'spirit', from, 1);
+    burst(this.world.fx, 'spirit', hit.point, 1);
+    this.play('chime', hit.point);
+    this.carryTarget = null;
+    this.ui.set({ carryStep: 'pick' });
   }
 
   private onBrush(phase: 'start' | 'move' | 'end', clientX: number, clientY: number): void {
@@ -557,9 +823,10 @@ export class Game {
     const planet = world.planet;
     this.aim.show(hit.point, kmToUnits(def.aimKm, planet.radiusKm));
     if (!this.stroke) {
+      // Time stands still while you shape the land (so replays see the same land).
       const event = this.newEvent(this.armed, hit.cell);
       event.stamps = [];
-      world.apply(event);
+      this.commit(event);
       this.stroke = { event, lastCell: -1, lastTime: 0 };
     }
     const s = this.stroke;
@@ -591,6 +858,8 @@ export class Game {
 
   private onHover(clientX: number, clientY: number): void {
     if (!this.world || !this.armed) return;
+    const def = powerDef(this.armed);
+    if (def.aimKm <= 0 && !(def.target === 'carry' && this.carryTarget !== null)) return;
     const now = performance.now();
     if (now - this.lastHover < 40) return;
     this.lastHover = now;
@@ -599,12 +868,12 @@ export class Game {
       this.aim.hide();
       return;
     }
-    this.aim.show(hit.point, kmToUnits(powerDef(this.armed).aimKm, this.world.world.planet.radiusKm));
+    this.aim.show(hit.point, kmToUnits(Math.max(def.aimKm, 30), this.world.world.planet.radiusKm));
   }
 
   /** After an event changed the world: repaint what changed and remember it. */
   private afterEvent(): void {
-    if (!this.world) return;
+    if (!this.world || !this.life) return;
     const { world, overlay, terrain } = this.world;
     world.computeOverlay(this.clock.minutes, overlay);
     if (world.changedCells.size > 0) {
@@ -614,7 +883,7 @@ export class Game {
     }
     this.applyOverlayViews(false);
     this.lastOverlayMinutes = this.clock.minutes;
-    this.ui.set({ eventCount: world.events.length });
+    this.ui.set({ eventCount: world.events.length, population: this.life.population() });
     this.save();
   }
 
@@ -656,59 +925,147 @@ export class Game {
   }
   private hadFlood = false;
 
-  // ---------------------------------------------------------------- rewinding
+  // ---------------------------------------------------------------- snapshots and rewinding
+
+  private takeSnapshot(periodic: boolean): void {
+    if (!this.world || !this.life) return;
+    const t = this.life.t;
+    const eventCount = this.world.world.events.length;
+    const last = this.snapshots[this.snapshots.length - 1];
+    if (last && last.t === t && last.eventCount === eventCount) return;
+    this.snapshots.push({ t, eventCount, data: this.life.serialize(), periodic });
+    this.pruneSnapshots();
+  }
+
+  /** Keeps many recent snapshots and fewer old ones (one per year, then one per decade). */
+  private pruneSnapshots(): void {
+    if (!this.life) return;
+    const now = this.life.t;
+    const out: LifeSnapshot[] = [];
+    let lastYear = -1;
+    let lastDecade = -1;
+    for (const s of this.snapshots) {
+      const age = now - s.t;
+      if (!s.periodic || age <= 25 * DAY) {
+        out.push(s);
+        continue;
+      }
+      const year = Math.floor(s.t / YEAR);
+      if (age <= 40 * YEAR) {
+        if (year !== lastYear) {
+          out.push(s);
+          lastYear = year;
+        }
+        continue;
+      }
+      const decade = Math.floor(year / 10);
+      if (decade !== lastDecade) {
+        out.push(s);
+        lastDecade = decade;
+      }
+    }
+    // At most 60 snapshots taken before powers.
+    const powerSnaps = out.filter((s) => !s.periodic);
+    const drop = new Set(powerSnaps.slice(0, Math.max(0, powerSnaps.length - 60)));
+    this.snapshots = out.filter((s) => !drop.has(s));
+  }
+
+  private findSnapshot(p: { minutes: number; eventCount: number }): LifeSnapshot | null {
+    let best: LifeSnapshot | null = null;
+    for (const s of this.snapshots) {
+      if (s.t <= p.minutes && s.eventCount <= p.eventCount && (!best || s.t >= best.t)) best = s;
+    }
+    return best;
+  }
 
   /** Points in time to rewind to: before each power used, and every 10 years. */
   rewindPoints(): RewindPoint[] {
     if (!this.world) return [];
     const events = this.world.world.events;
     const now = this.clock.minutes;
-    const points: RewindPoint[] = events.map((e, i) => ({ minutes: Math.max(0, e.minutes - 0.01), eventCount: i, kind: e.kind }));
+    const points: RewindPoint[] = events.map((e, i) => ({ minutes: e.minutes, eventCount: i, kind: e.kind }));
     for (let year = 10; (year - 1) * MINUTES_PER_YEAR <= now; year += 10) {
       const m = (year - 1) * MINUTES_PER_YEAR;
       points.push({ minutes: m, eventCount: events.filter((e) => e.minutes < m).length, kind: null });
     }
-    return points.sort((a, b) => b.minutes - a.minutes).slice(0, 40);
+    return points
+      .filter((p) => this.findSnapshot(p) !== null)
+      .sort((a, b) => b.minutes - a.minutes || b.eventCount - a.eventCount)
+      .slice(0, 40);
   }
 
   rewindTo(point: RewindPoint): void {
-    if (!this.world) return;
+    if (!this.world || !this.life) return;
+    const snap = this.findSnapshot(point);
+    if (!snap) return;
     for (const e of this.effects) e.dispose();
     this.effects = [];
     this.sparks.clear();
     this.smoke.clear();
     this.stroke = null;
-    const kept = this.world.world.events.slice(0, point.eventCount);
-    this.world.world.rebuild(kept);
+    const { world } = this.world;
+    const kept = world.events.slice(0, point.eventCount).map((e) => ({ ...e, stamps: e.stamps ? [...e.stamps] : undefined }));
+    // Back to the snapshot, then replay the powers used after it.
+    world.rebuild(kept.slice(0, snap.eventCount));
+    const life = Life.restore(snap.data);
+    for (let i = snap.eventCount; i < kept.length; i++) {
+      const e = kept[i];
+      life.advanceTo(e.minutes, world);
+      world.apply(e);
+      life.applyEvent(e, world);
+    }
+    life.advanceTo(point.minutes, world);
+    this.life = life;
+    this.snapshots = this.snapshots.filter((s) => s.t <= point.minutes && s.eventCount <= point.eventCount);
     this.nextEventId = kept.reduce((m, e) => Math.max(m, e.id), 0) + 1;
-    this.clock.minutes = point.minutes;
+    this.clock.minutes = Math.max(point.minutes, life.t);
+    this.lastPopulation = life.population();
+    if (this.selection?.kind === 'herd' && !life.herd(this.selection.id)) this.clearSelection();
     this.refreshEverything();
     if (this.selectedCell !== null) this.ui.set({ place: this.placeInfo(this.world.world.planet, this.selectedCell) });
-    this.ui.set({ eventCount: kept.length, date: dateFromMinutes(this.clock.minutes) });
+    this.ui.set({ eventCount: kept.length, date: dateFromMinutes(this.clock.minutes), population: life.population() });
     this.save();
     this.play('chill');
     this.notify('notice.rewound');
   }
 
-  // ---------------------------------------------------------------- internals
+  // ---------------------------------------------------------------- selection
 
-  private findStartCell(planet: PlanetData): number {
-    // A green, temperate place near the coast makes a friendly first view.
-    let best = 0;
-    let bestScore = -Infinity;
-    for (let i = 0; i < planet.cellCount; i += 7) {
-      const b = planet.biome[i];
-      if (isWater(b)) continue;
-      const lat = Math.abs(latitudeOf(planet.positions[i * 3 + 1]));
-      const green = b === Biome.TemperateForest || b === Biome.Grassland || b === Biome.Rainforest || b === Biome.Savanna;
-      const score = (green ? 2 : 0) - Math.abs(lat - 0.55) * 2 - Math.min(planet.coastDistance[i], 8) * 0.08 + ((i * 2654435761) % 1000) / 4000;
-      if (score > bestScore) {
+  private selectEntity(kind: 'person' | 'herd', id: number): void {
+    this.selectedCell = null;
+    this.selection = { kind, id };
+    if (this.following && kind !== 'person') this.following = false;
+    this.centering = this.narrow() ? 0.9 : 0;
+    this.pushUi();
+  }
+
+  /** The person or herd drawn closest to a screen point (within a finger's width). */
+  private pickEntity(clientX: number, clientY: number, accept: (e: { kind: 'person' | 'herd'; id: number }) => boolean): { kind: 'person' | 'herd'; id: number; pos: THREE.Vector3 } | null {
+    if (!this.world) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const cam = this.cameraCtl.camera;
+    const v = new THREE.Vector3();
+    const toCam = new THREE.Vector3();
+    let best: { kind: 'person' | 'herd'; id: number; pos: THREE.Vector3 } | null = null;
+    let bestScore = 38;
+    for (const e of this.world.lifeView.tappable) {
+      if (!accept(e)) continue;
+      toCam.subVectors(cam.position, e.pos);
+      if (toCam.dot(v.copy(e.pos).normalize()) < -0.2 * toCam.length()) continue;
+      v.copy(e.pos).addScaledVector(e.pos.clone().normalize(), 0.15).project(cam);
+      if (v.z > 1) continue;
+      const x = rect.left + ((v.x + 1) / 2) * rect.width;
+      const y = rect.top + ((1 - v.y) / 2) * rect.height;
+      const score = Math.hypot(x - clientX, y - clientY) - (e.kind === 'person' ? 10 : 0);
+      if (score < bestScore) {
         bestScore = score;
-        best = i;
+        best = { kind: e.kind, id: e.id, pos: e.pos };
       }
     }
     return best;
   }
+
+  // ---------------------------------------------------------------- internals
 
   private surfacePoint(planet: PlanetData, cell: number, out: THREE.Vector3): THREE.Vector3 {
     const r = Math.max(R, radiusForHeight(planet.heightM[cell]));
@@ -742,10 +1099,22 @@ export class Game {
     requestAnimationFrame((t) => this.frame(t));
     const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
-    if (!this.world) return;
-    const { world, overlay, sky, atmosphere, clouds, trees, terrain, fire } = this.world;
+    if (!this.world || !this.life) return;
+    const { world, overlay, sky, atmosphere, clouds, trees, terrain, fire, lifeView } = this.world;
+    const life = this.life;
 
-    this.clock.advance(dt);
+    // Time: the clock moves (not while shaping the land), the living world follows step by step.
+    if (!this.stroke) this.clock.advance(dt);
+    life.advanceTo(this.clock.minutes, world, MAX_TICKS_PER_FRAME);
+    if (this.clock.minutes - life.t > TICK * 3) this.clock.minutes = life.t + TICK;
+    if (life.t - (this.snapshots[this.snapshots.length - 1]?.t ?? -Infinity) >= 2 * DAY && now - this.lastSnapshotReal > 1200) {
+      this.lastSnapshotReal = now;
+      this.takeSnapshot(true);
+    }
+    const population = life.population();
+    if (population === 0 && this.lastPopulation > 0) this.notify('notice.extinct');
+    this.lastPopulation = population;
+
     const t = this.clock.minutes;
     const yf = this.clock.yearFraction();
     this.season.uSeason.value = seasonSignal(yf);
@@ -764,6 +1133,7 @@ export class Game {
     if (this.treeRebuildAt > 0 && now >= this.treeRebuildAt && !this.stroke) {
       this.treeRebuildAt = 0;
       trees.rebuild(world.planet, terrain.faceBiome, terrain.facePositions, (f) => this.faceVeg(f));
+      this.rebuildRivers();
     }
     this.syncOngoing(dt, t, now / 1000);
     this.effects = this.effects.filter((e) => {
@@ -775,9 +1145,36 @@ export class Game {
     this.smoke.update(dt);
     fire.update(dt);
 
+    // Following a person.
+    if (this.following && this.selection?.kind === 'person') {
+      if (this.cameraCtl.userPanned) {
+        this.following = false;
+        this.ui.set({ following: false });
+      } else {
+        const pos = lifeView.shownPosition(this.selection.id);
+        if (pos) this.cameraCtl.moveFocusToward(pos, 1 - Math.exp(-dt * 4));
+      }
+    }
+    // Phones: the panel covers the lower half, so lift the picture and glide onto what was tapped.
+    const sheet = this.selection !== null || this.selectedCell !== null;
+    this.cameraCtl.viewShiftTarget = sheet && this.narrow() ? 0.25 : 0;
+    if (this.centering > 0) {
+      this.centering = this.cameraCtl.userPanned || !sheet ? 0 : this.centering - dt;
+      const target =
+        this.selection !== null
+          ? lifeView.shownPosition(this.selection.id)
+          : this.selectedCell !== null
+            ? this.world.fx.surfacePoint(this.selectedCell)
+            : null;
+      if (target && !this.following) this.cameraCtl.moveFocusToward(target, 1 - Math.exp(-dt * 6));
+    }
+    this.cameraCtl.userPanned = false;
     this.cameraCtl.update(dt);
     const cam = this.cameraCtl.camera;
     cam.updateMatrixWorld();
+
+    lifeView.update(dt, life, now / 1000, t, cam, this.cameraCtl.distance, this.cameraCtl.focus);
+    this.updateMarkerAndBubbles();
 
     // Sun: real position, or a steady light in timelapse (days would flicker). Dust dims it.
     this.realSunDir.copy(this.computeRealSun());
@@ -802,6 +1199,8 @@ export class Game {
     const dusk = THREE.MathUtils.smoothstep(sunHeight, -0.3, -0.05) * (1 - day);
     this.skyColor.copy(SPACE_COLOR).lerp(DUSK_SKY_COLOR, low * dusk).lerp(DAY_SKY_COLOR, low * day).lerp(DUST_SKY_COLOR, low * day * dust * 0.8);
     (sky.stars.material as THREE.PointsMaterial).opacity = 1 - low * day * 0.95;
+    // A little moonlight close to the ground, so people stay visible at night.
+    this.ambient.intensity = 0.32 + 0.45 * low * (1 - day);
     const fog = this.scene.fog as THREE.Fog;
     fog.color.copy(this.skyColor);
     if (low > 0.01) {
@@ -830,6 +1229,28 @@ export class Game {
     if (now - this.lastSave > 10000) {
       this.lastSave = now;
       this.save();
+    }
+  }
+
+  private updateMarkerAndBubbles(): void {
+    if (!this.world || !this.life) return;
+    const { lifeView } = this.world;
+    const items: BubbleItem[] = [];
+    const selectedId = this.selection?.id;
+    for (const e of lifeView.tappable) {
+      if (e.kind !== 'person') continue;
+      const p = this.life.person(e.id);
+      if (!p) continue;
+      const selected = this.selection?.kind === 'person' && selectedId === p.id;
+      items.push({ id: p.id, pos: e.pos, symbol: bubbleSymbol(p), label: selected ? p.name : undefined, selected });
+    }
+    const w = this.canvas.clientWidth || window.innerWidth;
+    const h = this.canvas.clientHeight || window.innerHeight;
+    this.bubbles.update(items, this.cameraCtl.camera, w, h, this.cameraCtl.distance);
+    if (this.selection) {
+      const pos = lifeView.shownPosition(this.selection.id);
+      if (pos) this.marker.moveTo(pos);
+      else if (this.selection.kind === 'herd') this.marker.hide();
     }
   }
 
@@ -863,7 +1284,7 @@ export class Game {
   }
 
   private pushUi(): void {
-    if (!this.world) return;
+    if (!this.world || !this.life) return;
     const { world } = this.world;
     const f = this.cameraCtl.focus;
     const lon = longitudeOf(f.x, f.z);
@@ -874,9 +1295,62 @@ export class Game {
       focusHours: localSolarHours(lon, sunLon),
       focusDaylight: f.dot(this.realSunDir) > -0.05,
       climate: { kind: world.climateLabel(t), temperature: world.globalTemperature(t), dust: world.dust(t) },
+      population: this.life.population(),
     };
     if (this.selectedCell !== null) patch.place = this.placeInfo(world.planet, this.selectedCell);
+    if (this.selection?.kind === 'person') {
+      const p = this.life.person(this.selection.id);
+      patch.person = p ? this.personInfo(p) : null;
+      patch.herd = null;
+      patch.place = null;
+    } else if (this.selection?.kind === 'herd') {
+      const h = this.life.herd(this.selection.id);
+      patch.herd = h
+        ? {
+            id: h.id,
+            species: h.species,
+            count: h.count,
+            activity: h.species === 'wolf' ? (h.prey >= 0 && h.hunger > 0.3 ? 'hunting' : 'roaming') : h.hunger > 0.7 ? 'hungry' : h.next >= 0 ? 'moving' : 'grazing',
+            biome: world.planet.biome[h.cell] as Biome,
+          }
+        : null;
+      if (!h) this.selection = null;
+      patch.person = null;
+      patch.place = null;
+    } else {
+      patch.person = null;
+      patch.herd = null;
+    }
     this.ui.set(patch);
+  }
+
+  private personInfo(p: Person): PersonInfo {
+    const t = this.life!.t;
+    const activity: Activity = !p.alive
+      ? 'idle'
+      : p.action === 'walk'
+        ? (`walk.${p.goal}` as Activity)
+        : (p.action as Activity);
+    return {
+      id: p.id,
+      name: p.name,
+      sex: p.sex,
+      age: Math.floor(((p.died ?? t) - p.born) / YEAR),
+      alive: p.alive,
+      cause: p.cause ?? null,
+      revivable: !p.alive && p.died !== undefined && t - p.died <= REVIVE_WINDOW,
+      activity,
+      food: 1 - p.hunger,
+      water: 1 - p.thirst,
+      sleep: p.energy,
+      health: Math.max(0, p.health),
+      sick: p.sick > 0,
+      skin: p.look.skin < 0.34 ? 0 : p.look.skin < 0.67 ? 1 : 2,
+      hair: p.look.hair,
+      height: p.look.height < 0.96 ? 'short' : p.look.height > 1.05 ? 'tall' : 'average',
+      biome: this.world!.world.planet.biome[p.cell] as Biome,
+      log: [...p.log].reverse().slice(0, 12).map((l) => ({ date: dateFromMinutes(l.t), key: l.key, cause: l.cause })),
+    };
   }
 
   private placeInfo(planet: PlanetData, cell: number): PlaceInfo {
@@ -905,6 +1379,8 @@ export class Game {
     if (st.ash > 0.2) conditions.push('ash');
     if (st.veg < 0.6 && !st.burnt && !st.burning && !st.lavaRock && st.lavaHeat <= 0.05) conditions.push('damaged');
     if (world.isPlanted(cell)) conditions.push('planted');
+    if (st.bounty > 0.1) conditions.push('blessed');
+    if (st.plague) conditions.push('plague');
     return {
       cell,
       biome: planet.biome[cell] as Biome,
@@ -918,6 +1394,8 @@ export class Game {
       daylight: new THREE.Vector3(x, y, z).dot(this.realSunDir) > -0.05,
       frozen: water ? seasonalMean < -3.5 : seasonalMean < -1 && planet.biome[cell] !== Biome.Ice,
       conditions,
+      fresh: planet.fresh[cell],
+      food: this.life ? this.life.foodAt(world, cell, this.life.t) : 0,
     };
   }
 
@@ -935,9 +1413,12 @@ export class Game {
       this.clearSelection();
       return;
     }
+    this.selection = null;
+    this.following = false;
     this.selectedCell = hit.cell;
     this.marker.show(hit.point);
-    this.ui.set({ place: this.placeInfo(this.world.world.planet, hit.cell) });
+    this.centering = this.narrow() ? 0.9 : 0;
+    this.ui.set({ place: this.placeInfo(this.world.world.planet, hit.cell), person: null, herd: null, following: false });
   }
 
   /** Marches along the ray between the outer (mountain-top) and inner shells to find the ground. */
@@ -979,6 +1460,10 @@ export class Game {
     return null;
   }
 
+  private narrow(): boolean {
+    return (this.canvas.clientWidth || window.innerWidth) < 640;
+  }
+
   private resize(): void {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
@@ -995,13 +1480,15 @@ export class Game {
     this.ongoing.clear();
     this.sparks.clear();
     this.smoke.clear();
+    this.bubbles.clear();
     if (!this.world) return;
-    const { root, sky, terrain, trees, fire, flood } = this.world;
+    const { root, sky, terrain, trees, fire, flood, lifeView } = this.world;
     this.scene.remove(root, sky.stars, sky.sun, sky.moon);
     terrain.dispose();
     trees.dispose();
     fire.dispose();
     flood.dispose();
+    lifeView.dispose();
     const disposeObject = (obj: THREE.Object3D) => {
       obj.traverse((o) => {
         const mesh = o as THREE.Mesh;

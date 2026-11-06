@@ -33,6 +33,13 @@ export class PlaceMarker {
     this.time = 0;
   }
 
+  /** Follows something that moves, without restarting the pulse. */
+  moveTo(point: THREE.Vector3): void {
+    this.group.position.copy(point);
+    this.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), point.clone().normalize());
+    this.group.visible = true;
+  }
+
   hide(): void {
     this.group.visible = false;
   }

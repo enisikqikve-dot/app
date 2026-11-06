@@ -41,10 +41,10 @@ export function TopBar({ ui, rewindOpen, onSpeed, onMenu, onRewind, onSound }: P
           </span>
         )}
         <span class="epoch">
-          <span class="chip">{t('top.epoch')}</span>
+          <span class="chip">{t(ui.population > 0 ? 'epoch.paleolithic' : 'top.epoch')}</span>
           <span class="people" title={t('top.people')}>
             <IconPerson size={15} />
-            <span class="mono">0</span>
+            <span class="mono">{formatNumber(ui.population)}</span>
           </span>
         </span>
       </div>

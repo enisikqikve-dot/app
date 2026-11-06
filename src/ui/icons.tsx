@@ -248,3 +248,74 @@ export const IconSoundOff = (p: IconProps) => (
     <path d="M16 9.5l5 5M21 9.5l-5 5" />
   </Icon>
 );
+
+// ---- blessings, life & death
+
+export const IconHarvest = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 21V9" />
+    <path d="M12 9c0-2.5 1.5-4.5 4-5-.2 2.6-1.7 4.6-4 5ZM12 9c0-2.5-1.5-4.5-4-5 .2 2.6 1.7 4.6 4 5Z" />
+    <path d="M12 14c0-2.3 1.4-4 3.6-4.6-.2 2.4-1.5 4.1-3.6 4.6ZM12 14c0-2.3-1.4-4-3.6-4.6.2 2.4 1.5 4.1 3.6 4.6Z" />
+    <path d="M12 19c0-2.3 1.4-4 3.6-4.6-.2 2.4-1.5 4.1-3.6 4.6ZM12 19c0-2.3-1.4-4-3.6-4.6.2 2.4 1.5 4.1 3.6 4.6Z" />
+  </Icon>
+);
+
+export const IconHeal = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />
+    <path d="M12 9v5M9.5 11.5h5" />
+  </Icon>
+);
+
+export const IconRevive = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 18h16M7 18a5 5 0 0 1 10 0" />
+    <path d="M12 3v5M5.6 6.6l2.1 2.1M18.4 6.6l-2.1 2.1" />
+    <path d="M12 21v-3" />
+  </Icon>
+);
+
+export const IconCreatePeople = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="10" cy="8" r="3" />
+    <path d="M4 20a6 6 0 0 1 12 0" />
+    <path d="M19 7v6M16 10h6" />
+  </Icon>
+);
+
+export const IconAnimals = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="7" cy="9" r="1.8" />
+    <circle cx="12" cy="6.5" r="1.8" />
+    <circle cx="17" cy="9" r="1.8" />
+    <path d="M12 12c-3 0-5.5 3-5.5 5.2 0 1.6 1.3 2.3 2.8 2 1.1-.2 1.8-.6 2.7-.6s1.6.4 2.7.6c1.5.3 2.8-.4 2.8-2C17.5 15 15 12 12 12Z" />
+  </Icon>
+);
+
+export const IconSmite = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7 3h10M7 21h10" />
+    <path d="M8 3c0 4 4 5.5 4 9s-4 5-4 9M16 3c0 4-4 5.5-4 9s4 5 4 9" />
+  </Icon>
+);
+
+export const IconPlague = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+  </Icon>
+);
+
+export const IconHand = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4.5a1.5 1.5 0 0 1 3 0V11M14 10.5V6a1.5 1.5 0 0 1 3 0v7.5c0 4-2.5 7-6.5 7-2.6 0-4-1.2-5.4-3.4L3.4 14a1.5 1.5 0 0 1 2.5-1.6L8 15" />
+  </Icon>
+);
+
+export const IconFollow = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="7" />
+    <circle cx="12" cy="12" r="2" />
+    <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+  </Icon>
+);

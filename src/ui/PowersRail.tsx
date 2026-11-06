@@ -1,42 +1,44 @@
 import type { ComponentType } from 'preact';
 import { t, type MessageKey } from '../i18n';
+import type { PowerCategory } from '../sim/powers';
 import { IconBlessing, IconLife, IconLock, IconNature, IconWhisper } from './icons';
 
-interface Power {
+interface Group {
   key: MessageKey;
   Icon: ComponentType<{ size?: number }>;
-  /** Milestone in which this group unlocks; 0 = available now. */
-  milestone: number;
+  category: PowerCategory | null;
+  /** Milestone in which a locked group unlocks. */
+  milestone?: number;
 }
 
 /** The four groups of powers from the concept, unlocked milestone by milestone. */
-const POWERS: Power[] = [
-  { key: 'powers.nature', Icon: IconNature, milestone: 0 },
-  { key: 'powers.blessing', Icon: IconBlessing, milestone: 3 },
-  { key: 'powers.life', Icon: IconLife, milestone: 3 },
-  { key: 'powers.whisper', Icon: IconWhisper, milestone: 4 },
+const GROUPS: Group[] = [
+  { key: 'powers.nature', Icon: IconNature, category: 'nature' },
+  { key: 'powers.blessing', Icon: IconBlessing, category: 'blessing' },
+  { key: 'powers.life', Icon: IconLife, category: 'life' },
+  { key: 'powers.whisper', Icon: IconWhisper, category: null, milestone: 4 },
 ];
 
 interface Props {
-  natureOpen: boolean;
-  onNature: () => void;
+  open: PowerCategory | null;
+  onOpen: (category: PowerCategory) => void;
   onLocked: (message: string) => void;
 }
 
-export function PowersRail({ natureOpen, onNature, onLocked }: Props) {
+export function PowersRail({ open, onOpen, onLocked }: Props) {
   return (
     <nav class="powers glass" aria-label={t('powers.title')}>
       <span class="powers-title">{t('powers.title')}</span>
-      {POWERS.map(({ key, Icon, milestone }) => {
-        if (milestone === 0) {
+      {GROUPS.map(({ key, Icon, category, milestone }) => {
+        if (category) {
           return (
             <button
               key={key}
               type="button"
-              class={`power${natureOpen ? ' is-open' : ''}`}
-              aria-expanded={natureOpen}
+              class={`power${open === category ? ' is-open' : ''}`}
+              aria-expanded={open === category}
               title={t(key)}
-              onClick={onNature}
+              onClick={() => onOpen(category)}
             >
               <span class="power-icon">
                 <Icon size={22} />
@@ -45,7 +47,7 @@ export function PowersRail({ natureOpen, onNature, onLocked }: Props) {
             </button>
           );
         }
-        const soon = t('powers.soon', { n: milestone });
+        const soon = t('powers.soon', { n: milestone ?? 0 });
         return (
           <button
             key={key}

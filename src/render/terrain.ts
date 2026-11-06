@@ -27,6 +27,7 @@ const TINT_ASH = new THREE.Color(0x7a7874);
 const TINT_CHAR = new THREE.Color(0x1a1512);
 const TINT_LAVA_ROCK = new THREE.Color(0x2b2522);
 const TINT_CLEARED = new THREE.Color(0x8a9a52);
+const LAKE = new THREE.Color(0x3a7fac);
 
 const FOREST_BIOMES = new Set<number>([Biome.TemperateForest, Biome.Rainforest, Biome.Taiga]);
 
@@ -173,6 +174,43 @@ export class TerrainView {
     }
   }
 
+  /**
+   * Exact point on the ground in a direction (the triangle around `cell` hit by a ray
+   * from the planet's center). Falls back to the cell's own height.
+   */
+  groundAt(dir: THREE.Vector3, cell: number, out: THREE.Vector3): THREE.Vector3 {
+    const pos = this.facePositions;
+    for (let k = this.cellFaceOffsets[cell]; k < this.cellFaceOffsets[cell + 1]; k++) {
+      const o = this.cellFaces[k] * 9;
+      // Möller–Trumbore from the origin along dir.
+      const e1x = pos[o + 3] - pos[o];
+      const e1y = pos[o + 4] - pos[o + 1];
+      const e1z = pos[o + 5] - pos[o + 2];
+      const e2x = pos[o + 6] - pos[o];
+      const e2y = pos[o + 7] - pos[o + 1];
+      const e2z = pos[o + 8] - pos[o + 2];
+      const px = dir.y * e2z - dir.z * e2y;
+      const py = dir.z * e2x - dir.x * e2z;
+      const pz = dir.x * e2y - dir.y * e2x;
+      const det = e1x * px + e1y * py + e1z * pz;
+      if (Math.abs(det) < 1e-9) continue;
+      const inv = 1 / det;
+      const tx = -pos[o];
+      const ty = -pos[o + 1];
+      const tz = -pos[o + 2];
+      const u = (tx * px + ty * py + tz * pz) * inv;
+      if (u < -1e-4 || u > 1.0001) continue;
+      const qx = ty * e1z - tz * e1y;
+      const qy = tz * e1x - tx * e1z;
+      const qz = tx * e1y - ty * e1x;
+      const v = (dir.x * qx + dir.y * qy + dir.z * qz) * inv;
+      if (v < -1e-4 || u + v > 1.0001) continue;
+      const dist = (e2x * qx + e2y * qy + e2z * qz) * inv;
+      if (dist > 0) return out.copy(dir).multiplyScalar(dist);
+    }
+    return out.copy(dir).multiplyScalar(radiusForHeight(this.world.planet.heightM[cell]));
+  }
+
   facesOf(cells: Iterable<number>): number[] {
     this.stamp++;
     const out: number[] = [];
@@ -289,8 +327,12 @@ export class TerrainView {
   private paintFace(f: number, ov: Overlay | null): void {
     const c = this.tmp.setRGB(this.baseColor[f * 3], this.baseColor[f * 3 + 1], this.baseColor[f * 3 + 2]);
     let glow = 0;
+    const planet = this.world.planet;
+    if (planet.fresh[planet.faces[f * 3]] === 2 || planet.fresh[planet.faces[f * 3 + 1]] === 2 || planet.fresh[planet.faces[f * 3 + 2]] === 2) {
+      if (this.faceBiome[f] > Biome.ShallowSea) c.lerp(LAKE, 0.8);
+    }
     if (ov) {
-      const faces = this.world.planet.faces;
+      const faces = planet.faces;
       let char = 0;
       let wet = 0;
       let dry = 0;

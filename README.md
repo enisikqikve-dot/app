@@ -8,7 +8,33 @@ willst.
 
 👉 Das vollständige Spielkonzept steht in [KONZEPT.md](KONZEPT.md).
 
-## Stand: Meilenstein 2 – Zorn & Natur ✅
+## Stand: Meilenstein 3 – Erstes Leben ✅
+
+**Neu: Auf dem Planeten leben die ersten 6 Menschen und viele Tiere.**
+
+- **Menschen mit Bedürfnissen:**
+  - Sie haben Hunger, Durst und Müdigkeit.
+  - Sie suchen Wasser und Beeren, schlafen nachts und fliehen vor Feuer, Lava und Flut.
+  - Die Gruppe folgt einer Anführerin oder einem Anführer und zieht weiter, wenn das Essen knapp wird.
+  - Der Tod hat echte Ursachen, und an der Stelle bleibt ein Grab.
+- **Symbol-Blasen** über den Köpfen zeigen, was jemand gerade braucht oder tut (💧 🫐 💤 🤒 😱).
+- **Akte:** Tippe auf einen Menschen. Du siehst Name, Alter, Aussehen, die Bedürfnisse als Balken und den Lebenslauf.
+- **Folgen:** Die Kamera begleitet einen Menschen.
+- **Tiere im Ökosystem:**
+  - Es gibt Hirsche, Wildrinder, Mammuts und Wölfe in Herden.
+  - Sie grasen, bekommen im Frühling Junge und wandern.
+  - Wölfe jagen, und im Winter wird das Futter knapp.
+- **Flüsse und Seen:** Das Wasser fließt bergab zum Meer und sammelt sich in Senken.
+
+| Gruppe | Kräfte |
+|---|---|
+| Segen & Wunder | Reiche Ernte, Heilen, Wiederbeleben (bis 5 Tage nach dem Tod) |
+| Leben & Tod | Menschen erschaffen (1, 2 oder 5), Unsichtbare Hand (tragen), Sterben lassen, Tiere aussetzen, Seuche |
+
+- **Zurückspulen** stellt jetzt auch alle Menschen und Tiere wieder her, genau so, wie sie damals waren.
+- Auf dem Handy rückt das Bild nach oben, damit die Akte niemanden verdeckt.
+
+### Meilenstein 2 – Zorn & Natur ✅
 
 **Neu: 14 Naturkräfte.** Du findest sie links unter „Natur“:
 
@@ -61,6 +87,12 @@ Startplaneten neu laden und nur die Kräfte vor dem gewählten Zeitpunkt noch
 einmal anwenden. Das ist exakt reproduzierbar, die Tests prüfen es. Der
 Spielstand ist deshalb sehr klein.
 
+Seit Meilenstein 3 leben Menschen und Tiere auf dem Planeten. Ihr Leben läuft
+in festen Schritten von 20 Spielminuten mit eigenem Zufall. Vor jeder Kraft und
+alle paar Spieltage speichert das Spiel ein kleines Abbild davon. Beim
+Zurückspulen lädt es das passende Abbild und rechnet von dort aus weiter. Auch
+das ist exakt reproduzierbar.
+
 ## Aufbau
 
 ```
@@ -70,8 +102,10 @@ src/
     clock.ts   Kalender, Geschwindigkeiten, Sonnenstand
     planet/    geodätisches Netz, Gelände, Klima, Landschaften
     world.ts   Welt-Gedächtnis: Ereignisse, Narben (Feuer, Lava, Flut …), Klima
+    life/      Menschen, Tierherden, Nahrung (feste Schritte, eigener Zufall)
     powers.ts  die Götterkräfte
-  render/      Three.js: Boden, Meer, Atmosphäre, Himmel, Bäume, Wolken, Kamera
+  render/      Three.js: Boden, Meer, Flüsse, Atmosphäre, Himmel, Bäume, Wolken,
+               Menschen, Tiere, Sprechblasen, Kamera
     fx/        Partikel und Effekte der Götterkräfte
   audio/       Geräusche (Web Audio, im Code erzeugt)
   game/        Game: verbindet Simulation, Grafik und Oberfläche

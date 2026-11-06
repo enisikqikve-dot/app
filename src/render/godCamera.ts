@@ -51,6 +51,13 @@ export class GodCamera {
   tiltOffset = 0;
   /** While true, a one-pointer drag goes to `onBrush` instead of panning. */
   brushMode = false;
+  /** Set whenever the player moves the view (so following a person can stop). */
+  userPanned = false;
+  /** Moves the picture up by this share of the screen height, to leave room for a bottom sheet on phones. */
+  viewShiftTarget = 0;
+  private viewShift = 0;
+  private viewW = 1;
+  private viewH = 1;
 
   private readonly dom: HTMLElement;
   private brushing = false;
@@ -99,12 +106,29 @@ export class GodCamera {
   }
 
   setViewport(width: number, height: number): void {
+    this.viewW = Math.max(1, width);
+    this.viewH = Math.max(1, height);
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
   }
 
+  /** Turns the planet so the focus moves a fraction `k` (0 … 1) of the way toward `dir`. */
+  moveFocusToward(dir: THREE.Vector3, k: number): void {
+    const target = this.tmpV.copy(dir).normalize();
+    const angle = this.focus.angleTo(target) * Math.min(1, Math.max(0, k));
+    if (angle < 1e-7) return;
+    const axis = this.tmpV2.crossVectors(this.focus, target);
+    if (axis.lengthSq() < 1e-12) return;
+    axis.normalize();
+    this.tmpQ.setFromAxisAngle(axis, angle);
+    this.focus.applyQuaternion(this.tmpQ).normalize();
+    this.forward.applyQuaternion(this.tmpQ);
+    this.reorthogonalize();
+  }
+
   /** Moves the focus over the surface by screen pixels. */
   pan(dxPx: number, dyPx: number): void {
+    this.userPanned = true;
     const viewHeight = this.dom.clientHeight || 1;
     const unitsPerPx = (2 * this.distance * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / viewHeight;
     const k = unitsPerPx / Math.max(R, this.surface);
@@ -165,6 +189,7 @@ export class GodCamera {
     this.distance += (this.targetDistance - this.distance) * (1 - Math.exp(-dt * 9));
     const wantSurface = this.opts.surfaceRadius(this.focus);
     this.surface += (wantSurface - this.surface) * (1 - Math.exp(-dt * 6));
+    this.viewShift += (this.viewShiftTarget - this.viewShift) * (1 - Math.exp(-dt * 6));
 
     this.applyToCamera();
   }
@@ -192,6 +217,8 @@ export class GodCamera {
     }
     this.camera.near = Math.max(0.02, this.distance * 0.012);
     this.camera.far = pos.length() + 2600;
+    if (Math.abs(this.viewShift) > 0.002) this.camera.setViewOffset(this.viewW, this.viewH, 0, this.viewShift * this.viewH, this.viewW, this.viewH);
+    else if (this.camera.view?.enabled) this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
   }
 

@@ -9,6 +9,7 @@ import { planetName } from '../../core/names';
 import type { PlanetSize } from '../../core/worldCode';
 import { buildGeodesicGrid, type GeodesicGrid } from './geodesic';
 import { Biome, classifyBiome } from './biomes';
+import { computeRivers } from './rivers';
 
 export interface PlanetPreset {
   /** Segments per icosahedron edge; cells = 10·f² + 2. */
@@ -44,6 +45,12 @@ export interface PlanetData extends GeodesicGrid {
   /** Steps to the nearest cell of the other kind (land ↔ water). 0 = coast. */
   coastDistance: Uint16Array;
   oceanFraction: number;
+  /** Downhill neighbor of each land cell (−1: hollow or sea). */
+  flowTo: Int32Array;
+  /** Water flowing through each land cell. */
+  flow: Float32Array;
+  /** Fresh water: 0 none, 1 river, 2 lake, 3 spring (see rivers.ts). */
+  fresh: Uint8Array;
 }
 
 export function latitudeOf(y: number): number {
@@ -237,8 +244,11 @@ export function generatePlanet(seed: number, size: PlanetSize): PlanetData {
     if (!land) waterCells++;
   }
 
+  const water = computeRivers(grid, heightM, moisture);
+
   return {
     ...grid,
+    ...water,
     seed,
     size,
     name: planetName(seed),

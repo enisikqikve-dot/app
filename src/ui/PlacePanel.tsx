@@ -4,7 +4,7 @@ import { isWater } from '../sim/planet/biomes';
 import { biomeInfo, biomeName, climateZone, formatHours, formatLatLon, formatTemperature, moistureLabel } from './format';
 import { IconClose, IconMoon, IconSun } from './icons';
 
-const HOT = new Set(['burning', 'lava']);
+const HOT = new Set(['burning', 'lava', 'plague']);
 
 export function PlacePanel({ place, onClose }: { place: PlaceInfo; onClose: () => void }) {
   const water = isWater(place.biome);
@@ -17,6 +17,12 @@ export function PlacePanel({ place, onClose }: { place: PlaceInfo; onClose: () =
     [t('info.tempNow'), formatTemperature(place.temperatureNow)],
     [t('info.tempMean'), formatTemperature(place.meanTemperature)],
     ...(water ? [] : [[t('info.moisture'), `${moistureLabel(place.moisture)} · ${Math.round(place.moisture * 100)} %`] as [string, string]]),
+    ...(water
+      ? []
+      : ([
+          [t('info.fresh'), t(`fresh.${place.fresh}` as MessageKey)],
+          [t('info.food'), t(`food.${place.food < 0.15 ? 0 : place.food < 0.4 ? 1 : place.food < 0.8 ? 2 : 3}` as MessageKey)],
+        ] as [string, string][])),
     [t('info.zone'), climateZone(place.latitude)],
   ];
   return (
